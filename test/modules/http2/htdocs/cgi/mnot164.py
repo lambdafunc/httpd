@@ -1,19 +1,11 @@
 #!/usr/bin/env python3
+import os, sys
+from requestparser import get_request_params
 
-import cgi
-import cgitb; cgitb.enable()
-import os
-import sys
 
-try:
-    form = cgi.FieldStorage()
-    count = form['count'].value
-    text = form['text'].value
-except KeyError:
-    text="a"
-    count=77784
-
-count = int(count)
+forms, files = get_request_params()
+text = forms['text'] if 'text' in forms else "a"
+count = int(forms['count']) if 'count' in forms else 77784
 
 print("Status: 200 OK")
 print("Content-Type: text/html")

@@ -172,6 +172,11 @@ ProxyVia On
 &lt;/Proxy&gt;
     </highlight>
     </example>
+    <example><title><a id="wsupgrade" name="wsupgrade">Websocket Upgrade (2.4.47 and later)</a></title>
+    <highlight language="config">
+ProxyPass "/some/ws/capable/path/" "http://example.com/some/ws/capable/path/" upgrade=websocket
+    </highlight>
+    </example>
     </section> <!-- /examples -->
 
     <section id="handler"><title>Access via Handler</title>
@@ -185,7 +190,7 @@ ProxyVia On
       <example><title>Reverse Proxy PHP scripts</title>
       <highlight language="config">
 &lt;FilesMatch "\.php$"&gt;
-    SetHandler  "proxy:unix:/path/to/app.sock|fcgi://localhost/"
+    SetHandler  "proxy:unix:/path/to/app.sock|fcgi://localhost"
 &lt;/FilesMatch&gt;
       </highlight>
       </example>
@@ -723,9 +728,10 @@ ProxyRemote ftp http://ftpproxy.mydomain:8080
 <name>ProxyRemoteMatch</name>
 <description>Remote proxy used to handle requests matched by regular
 expressions</description>
-<syntax>ProxyRemoteMatch <var>regex</var> <var>remote-server</var></syntax>
+<syntax>ProxyRemoteMatch <var>regex</var> <var>remote-server</var> [<var>username:password</var>]</syntax>
 <contextlist><context>server config</context><context>virtual host</context>
 </contextlist>
+<compatibility>The optional third argument is usable only in httpd 2.5.1 and later.</compatibility>
 
 <usage>
     <p>The <directive>ProxyRemoteMatch</directive> is identical to the
@@ -1254,7 +1260,7 @@ ProxyPass "/example" "http://backend.example.com" max=20 ttl=120 retry=300
     </td></tr>
     <tr><td>timeout</td>
         <td><directive module="mod_proxy">ProxyTimeout</directive></td>
-        <td>Connection timeout in seconds.
+        <td>Socket timeout in seconds.
         The number of seconds Apache httpd waits for data sent by / to the backend.
         Uses the <a href="directive-dict.html#Syntax">time-interval</a> directive syntax.
     </td></tr>
@@ -1275,10 +1281,13 @@ ProxyPass "/example" "http://backend.example.com" max=20 ttl=120 retry=300
         <td><p>Value of secret used by <module>mod_proxy_ajp</module>.
         See the documentation of this module for more details.</p>
     </td></tr>
-    <tr><td>upgrade</td>
-        <td>WebSocket</td>
-        <td><p>Protocol accepted in the Upgrade header by <module>mod_proxy_wstunnel</module>.
-        See the documentation of this module for more details.</p>
+    <tr><td><a id="upgrade" name="upgrade">upgrade</a></td>
+        <td>-</td>
+        <td><p>Protocol accepted by <module>mod_proxy_http</module> or
+        <module>mod_proxy_wstunnel</module> for the HTTP Upgrade mechanism
+        upon negotiation by the HTTP client/browser (per
+        <a href="https://www.ietf.org/rfc/rfc9110.html#name-upgrade">RFC 9110 - Upgrade</a>).
+        See the <a href="#protoupgrade">Protocol Upgrade</a> note below</p>
     </td></tr>
     <tr><td>mapping</td>
         <td>-</td>
@@ -1311,6 +1320,15 @@ ProxyPass "/example" "http://backend.example.com" max=20 ttl=120 retry=300
             use the <code>mapping=servlet</code> setting to prevent path parameters and alike from
             interfering with the authorizations that are to be enforced in by the Apache httpd.</p>
         </note>
+    </td></tr>
+    <tr><td><a id="addressttl" name="addressttl">addressttl</a></td>
+        <td>-1</td>
+        <td><p>TTL in seconds for how long DNS resolutions of the backend address are cached.
+        -1 means until restart of Apache httpd.</p>
+    </td></tr>
+    <tr><td><a id="multipathtcp" name="multipathtcp">multipathtcp</a></td>
+        <td>Off</td>
+        <td><p>Enable/disable the use of <a href="https://mptcp.dev">Multipath TCP (MPTCP)</a></p>
     </td></tr>
 
     </table>
@@ -1500,6 +1518,26 @@ RewriteRule ^/mirror/foo/(.*) %{ENV:protocol}://backend.example.com/$1 [P]
 ProxyPassReverse  "/mirror/foo/" "http://backend.example.com/"
 ProxyPassReverse  "/mirror/foo/" "https://backend.example.com/"
     </highlight>
+
+    <note><title><a id="protoupgrade" name="protoupgrade">Protocol Upgrade</a></title>
+      <p>Since Apache HTTP Server 2.4.47, protocol Upgrade (tunneling) can be handled
+      end-to-end by <module>mod_proxy_http</module> using the <directive>ProxyPass</directive>
+      parameter <var><a href="#upgrade">upgrade</a></var>.</p>
+      <p>End-to-end means that the HTTP Upgrade request from the client/browser is first
+      forwarded by <module>mod_proxy_http</module> to the origin server and the connection
+      will be upgraded (and tunneled by <module>mod_proxy_http</module>) only if the origin
+      server accepts/initiates the upgrade (HTTP response <code>101 Switching Protocols</code>).
+      If the origin server responds with anything else <module>mod_proxy_http</module>
+      will continue forwarding (and enforcing) the HTTP protocol as usual for this
+      connection.</p>
+      <p>See <a href="#wsupgrade">Websocket Upgrade (2.4.47 and later)</a> for an example of
+      configuration using <module>mod_proxy_http</module>.</p>
+      <p>For Apache HTTP Server 2.4.46 and earlier (or if
+      <directive module="mod_proxy_wstunnel">ProxyWebsocketFallbackToProxyHttp</directive>
+      from 2.4.48 and later disables <module>mod_proxy_http</module> handling), see the
+      documentation of <module>mod_proxy_wstunnel</module> for how to proxy the WebSocket
+      protocol.</p>
+    </note>
 </usage>
 </directivesynopsis>
 

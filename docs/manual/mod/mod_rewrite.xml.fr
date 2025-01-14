@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" ?>
 <!DOCTYPE modulesynopsis SYSTEM "../style/modulesynopsis.dtd">
 <?xml-stylesheet type="text/xsl" href="../style/manual.fr.xsl"?>
-<!-- English Revision: 1901487 -->
+<!-- English Revision: 1919564 -->
 <!-- French translation : Lucien GENTIS -->
 <!-- Reviewed by : Vincent Deffontaines -->
 
@@ -56,7 +56,11 @@ règles permettant de réécrire les URLs des requêtes
       vers un traitement secondaire interne, une redirection vers une
       requête externe ou vers le mandataire interne.</p>
 
-      <p>Vous trouverez d'avantage de détails, discussions et exemples
+      <p>Une expression rationnelle ne nécessite des guillemets que si elle
+      contient des espaces non échappées et dans ce cas, les guillemets simples
+      ou doubles sont équivalents.</p>
+
+      <p>Vous trouverez plus de détails, discussions et exemples
       dans la
       <a href="../rewrite/">documentation détaillée
       sur mod_rewrite</a>.</p>
@@ -726,7 +730,11 @@ la réécriture soit effectuée
 		  <dd>La partie chemin de l'URI de la requête, comme
 		  "/index.html". Ceci exclut en particulier la chaîne de
 		  paramètres de la requête qui est contenue dans la
-		  variable <code>QUERY_STRING</code>.</dd>
+		  variable <code>QUERY_STRING</code>. La valeur renvoyée pour
+		  <code>REQUEST_URI</code> a déjà été %-décodée ; pour la
+		  recoder, passez-la à la <a href="#mapfunc">fonction de
+		  mappage</a> "escape".
+		  </dd>
 
                   <dt><code>THE_REQUEST</code></dt>
 
@@ -1154,6 +1162,14 @@ RewriteRule  "^/$"                 "/homepage.std.html"  [L]
 	sera renvoyée. Dans le cas contraire, ce sera la page d'accueil
 	standard.</p>
 
+	<p>Par défaut, plusieurs directives <directive>RewriteCond</directive>
+	sont évaluées de manière séquentielle et combinées à l'aide d'un
+	<strong>ET</strong> logique. Si une condition n'est pas vérifiée et en
+	l'absence d'un opérateur logique <strong><code>OU</code></strong>,
+	l'ensemble du jeu de règles est abandonné et les conditions restantes ne
+	sont pas évaluées.
+        </p> 
+
 </usage>
 
 </directivesynopsis>
@@ -1267,16 +1283,16 @@ du contexte de <em>répertoire</em>.</li>
 <li>Par défaut, mod_rewrite écrase les règles précédentes au sein de <a
 href="../sections.html#merging">sections combinées</a> appartenant au même
 contexte. Pour modifier ce comportement, on peut utiliser la directive
-<directive module="rewrite">RewriteOptions</directive> pour définir par exemple
-l'option <em>Inherit</em>.</li>
+<directive module="mod_rewrite">RewriteOptions</directive> pour définir par
+exemple l'option <em>Inherit</em>.</li>
 
-<li>La directive <directive module="rewrite">RewriteOptions</directive> permet
-aussi de contrôler le comportement des sections définies au même niveau
+<li>La directive <directive module="mod_rewrite">RewriteOptions</directive>
+permet aussi de contrôler le comportement des sections définies au même niveau
 d'imbrication dans la configuration. Dans l'exemple suivant, par défaut seule la
 règle RewriteRules définie dans le second bloc <directive
 module="core">If</directive> est prise en compte car celle définie dans le
 premier bloc est écrasée. Définir <directive
-module="rewrite">RewriteOptions</directive> Inherit force mod_rewrite à combiner
+module="mod_rewrite">RewriteOptions</directive> Inherit force mod_rewrite à combiner
 les deux sections en prenant en compte les deux règles et pas seulement la
 dernière.</li>
 </ul>
@@ -1458,10 +1474,22 @@ substitution !
     </tr>
     <tr>
         <td>B</td>
-        <td>Echappe les caractères non-alphanumériques
-	dans les références arrières <em>avant</em>
-	d'appliquer la transformation. <em><a
-        href="../rewrite/flags.html#flag_b">détails ...</a></em></td>
+	<td>Echappe les caractères non-alphanumériques dans les références
+	arrières <em>avant</em> d'appliquer la transformation. Pour un
+	échappement similaire des variables du serveur, voir la <a
+	href="#mapfunc">fonction de mappage</a> "escape".<em><a
+	href="../rewrite/flags.html#flag_b">détails ...</a></em></td>
+    </tr>
+    <tr>
+        <td>BCTLS</td>
+        <td>Identique à [B], mais n'échappe que les espaces et les caractères de
+	contrôle. <em><a href="../rewrite/flags.html#flag_bctls">détails ...</a></em></td>
+    </tr>
+    <tr>
+        <td>BNE</td>
+	<td>Les caractères de [B] ou [BCTLS] qui <strong>ne doivent pas</strong>
+	être échappés.  <em><a href="../rewrite/flags.html#flag_bne">détails
+	...</a></em></td>
     </tr>
     <tr>
         <td>backrefnoplus|BNP</td>
@@ -1615,6 +1643,31 @@ substitution !
         <td>Force l'attribution du <glossary>Type-MIME</glossary>
 	spécifié au fichier cible. <em><a
         href="../rewrite/flags.html#flag_t">détails ...</a></em></td>
+    </tr>
+    <tr>
+        <td>UnsafeAllow3F</td>
+        <td>Autorise les substitutions à partir d’URL potentiellement non
+	fiables.
+        <em><a href="../rewrite/flags.html#flag_unsafe_allow_3f">détails ...</a></em>
+        </td>
+    </tr>
+    <tr>
+        <td>UnsafePrefixStat</td>
+        <td>Autorise les substitutions potentiellement non fiables à partir
+	d’une variable de tête ou d’une référence arrière vers un chemin du
+	système de fichiers.
+        <em><a href="../rewrite/flags.html#flag_unsafe_prefix_stat">détails ...</a></em><br />
+        <since>2.5.1</since>
+        </td>
+    </tr>
+    <tr>
+        <td>UNC</td>
+        <td>
+	Empêche la fusion des slashes de début multiples tels que ceux utilisés
+	dans les chemins UNC de Windows.
+        <em><a href="../rewrite/flags.html#flag_unc">details ...</a></em><br />
+        <since>2.5.1</since> 
+        </td>
     </tr>
     </table>
 

@@ -31,6 +31,7 @@
 #include "md_json.h"
 #include "md_result.h"
 #include "md_reg.h"
+#include "md_ocsp.h"
 #include "md_store.h"
 #include "md_status.h"
 #include "md_tailscale.h"
@@ -1193,7 +1194,7 @@ static apr_status_t run_load_staging(void *baton, apr_pool_t *p, apr_pool_t *pte
     result =  va_arg(ap, md_result_t*);
     
     if (APR_STATUS_IS_ENOENT(rv = md_load(reg->store, MD_SG_STAGING, md->name, NULL, ptemp))) {
-        md_log_perror(MD_LOG_MARK, MD_LOG_TRACE2, 0, ptemp, "%s: nothing staged", md->name);
+        md_log_perror(MD_LOG_MARK, MD_LOG_DEBUG, 0, ptemp, "%s: nothing staged", md->name);
         goto out;
     }
     
@@ -1258,7 +1259,9 @@ apr_status_t md_reg_load_stagings(md_reg_t *reg, apr_array_header_t *mds,
         }
         else if (!APR_STATUS_IS_ENOENT(rv)) {
             md_log_perror(MD_LOG_MARK, MD_LOG_ERR, rv, p, APLOGNO(10069)
-                          "%s: error loading staged set", md->name);
+                          "%s: error loading staged set, purging it", md->name);
+            md_store_purge(reg->store, p, MD_SG_STAGING, md->name);
+            md_store_purge(reg->store, p, MD_SG_CHALLENGES, md->name);
         }
     }
 
@@ -1320,4 +1323,39 @@ void md_reg_set_warn_window_default(md_reg_t *reg, md_timeslice_t *warn_window)
 md_job_t *md_reg_job_make(md_reg_t *reg, const char *mdomain, apr_pool_t *p)
 {
     return md_job_make(p, reg->store, MD_SG_STAGING, mdomain, reg->min_delay);
+}
+
+static int get_cert_count(const md_t *md)
+{
+    if (md->cert_files && md->cert_files->nelts) {
+        return md->cert_files->nelts;
+    }
+    return md_pkeys_spec_count(md->pks);
+}
+
+int md_reg_has_revoked_certs(md_reg_t *reg, struct md_ocsp_reg_t *ocsp,
+                             const md_t *md, apr_pool_t *p)
+{
+    const md_pubcert_t *pubcert;
+    const md_cert_t *cert;
+    md_timeperiod_t ocsp_valid;
+    md_ocsp_cert_stat_t cert_stat;
+    apr_status_t rv = APR_SUCCESS;
+    int i;
+
+    if (!md->stapling || !ocsp)
+        return 0;
+
+    for (i = 0; i < get_cert_count(md); ++i) {
+        if (APR_SUCCESS != md_reg_get_pubcert(&pubcert, reg, md, i, p))
+            continue;
+        cert = APR_ARRAY_IDX(pubcert->certs, 0, const md_cert_t*);
+        if(!cert)
+            continue;
+        rv = md_ocsp_get_meta(&cert_stat, &ocsp_valid, ocsp, cert, p, md);
+        if (APR_SUCCESS == rv && cert_stat == MD_OCSP_CERT_ST_REVOKED) {
+            return 1;
+        }
+    }
+    return 0;
 }

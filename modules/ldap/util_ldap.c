@@ -200,7 +200,7 @@ static int util_ldap_handler(request_rec *r)
     st = (util_ldap_state_t *) ap_get_module_config(r->server->module_config,
             &ldap_module);
 
-    ap_set_content_type(r, "text/html; charset=ISO-8859-1");
+    ap_set_content_type_ex(r, "text/html; charset=ISO-8859-1", 1);
 
     if (r->header_only)
         return OK;
@@ -379,7 +379,7 @@ static int uldap_connection_init(request_rec *r,
         /* something really bad happened */
         ldc->bound = 0;
         if (NULL == ldc->reason) {
-            ldc->reason = "LDAP: ldap initialization failed";
+            ldc->reason = "LDAP: ldap initialization failed. Make sure the apr_ldap module is installed.";
         }
         return(APR_EGENERAL);
     }
@@ -452,7 +452,7 @@ static int uldap_connection_init(request_rec *r,
 
     if (ldc->ChaseReferrals != AP_LDAP_CHASEREFERRALS_SDKDEFAULT) {
         /* Set options for rebind and referrals. */
-        ap_log_error(APLOG_MARK, APLOG_TRACE4, 0, r->server, APLOGNO(01278)
+        ap_log_error(APLOG_MARK, APLOG_TRACE4, 0, r->server,
                 "LDAP: Setting referrals to %s.",
                 ((ldc->ChaseReferrals == AP_LDAP_CHASEREFERRALS_ON) ? "On" : "Off"));
         apr_ldap_set_option(r->pool, ldc->ldap,
@@ -2817,12 +2817,14 @@ static const char *util_ldap_set_conn_ttl(cmd_parms *cmd,
                                           void *dummy,
                                           const char *val)
 {
-    apr_interval_time_t timeout;
+    apr_interval_time_t timeout = -1;
     util_ldap_state_t *st =
         (util_ldap_state_t *)ap_get_module_config(cmd->server->module_config,
                                                   &ldap_module);
 
-    if (ap_timeout_parameter_parse(val, &timeout, "s") != APR_SUCCESS) {
+    /* Negative values mean AP_LDAP_CONNPOOL_INFINITE */
+    if (val[0] != '-' &&
+        ap_timeout_parameter_parse(val, &timeout, "s") != APR_SUCCESS) {
         return "LDAPConnectionPoolTTL has wrong format";
     }
 

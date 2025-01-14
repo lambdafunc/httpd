@@ -57,7 +57,6 @@
 #include "http_protocol.h"
 #include "http_main.h"
 #include "http_log.h"
-#include "util_script.h"
 #include "ap_mpm.h"
 #include "mpm_common.h"
 #include "mod_suexec.h"
@@ -1059,6 +1058,11 @@ static int cgid_init(apr_pool_t *p, apr_pool_t *plog, apr_pool_t *ptemp,
 
         parent_pid = getpid();
         tmp_sockname = ap_runtime_dir_relative(p, sockname);
+        if (!tmp_sockname) {
+            ap_log_error(APLOG_MARK, APLOG_ERR, 0, main_server, APLOGNO(10423)
+                         "Invalid socket path %s", sockname);
+            return DECLINED;
+        }
         if (strlen(tmp_sockname) > sizeof(server_addr->sun_path) - 1) {
             tmp_sockname[sizeof(server_addr->sun_path)] = '\0';
             ap_log_error(APLOG_MARK, APLOG_ERR, 0, main_server, APLOGNO(01254)
@@ -1667,7 +1671,7 @@ static apr_status_t include_cgi(include_ctx_t *ctx, ap_filter_t *f,
     /* Force sub_req to be treated as a CGI request, even if ordinary
      * typing rules would have called it something else.
      */
-    ap_set_content_type(rr, CGI_MAGIC_TYPE);
+    ap_set_content_type_ex(rr, CGI_MAGIC_TYPE, 1);
 
     /* Run it. */
     rr_status = ap_run_sub_req(rr);

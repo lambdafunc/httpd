@@ -78,9 +78,8 @@ static apr_status_t upgrade_connection(request_rec *r)
 
     /* Perform initial SSL handshake. */
     SSL_set_accept_state(ssl);
-    SSL_do_handshake(ssl);
 
-    if (!SSL_is_init_finished(ssl)) {
+    if ((SSL_do_handshake(ssl) != 1) || !SSL_is_init_finished(ssl)) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, APLOGNO(02030)
                       "TLS upgrade handshake failed");
         ssl_log_ssl_error(SSLLOG_MARK, APLOG_ERR, r->server);
@@ -989,18 +988,23 @@ static int ssl_hook_Access_classic(request_rec *r, SSLSrvConfigRec *sc, SSLDirCo
                           "protocol (%s support secure renegotiation)",
                           reneg_support);
 
-            SSL_set_session_id_context(ssl,
+            if(!SSL_set_session_id_context(ssl,
                                        (unsigned char *)&id,
-                                       sizeof(id));
+                                       sizeof(id))) {
+
+                ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, APLOGNO(10422)
+                              "error setting SSL session context");
+                ssl_log_ssl_error(SSLLOG_MARK, APLOG_ERR, r->server);
+
+                r->connection->keepalive = AP_CONN_CLOSE;
+                return HTTP_FORBIDDEN;
+            }
 
             /* Toggle the renegotiation state to allow the new
              * handshake to proceed. */
             modssl_set_reneg_state(sslconn, RENEG_ALLOW);
 
-            SSL_renegotiate(ssl);
-            SSL_do_handshake(ssl);
-
-            if (!SSL_is_init_finished(ssl)) {
+            if(!SSL_renegotiate(ssl) || (SSL_do_handshake(ssl) != 1) || !SSL_is_init_finished(ssl)) {
                 ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, APLOGNO(02225)
                               "Re-negotiation request failed");
                 ssl_log_ssl_error(SSLLOG_MARK, APLOG_ERR, r->server);
@@ -1185,7 +1189,12 @@ static int ssl_hook_Access_modern(request_rec *r, SSLSrvConfigRec *sc, SSLDirCon
             
             modssl_set_app_data2(ssl, r);
 
-            SSL_do_handshake(ssl);
+            if(SSL_do_handshake(ssl) != 1) {
+                ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, APLOGNO(10421)
+                              "TLS handshake failure");
+                ssl_log_ssl_error(SSLLOG_MARK, APLOG_ERR, r->server);
+                return HTTP_FORBIDDEN;
+            }
             /* Need to trigger renegotiation handshake by reading.
              * Peeking 0 bytes actually works.
              * See: http://marc.info/?t=145493359200002&r=1&w=2
@@ -1532,10 +1541,20 @@ static const char *const ssl_hook_Fixup_vars[] = {
     "SSL_SERVER_A_SIG",
     "SSL_SESSION_ID",
     "SSL_SESSION_RESUMED",
+    "SSL_SHARED_CIPHERS",
 #ifdef HAVE_SRP
     "SSL_SRP_USER",
     "SSL_SRP_USERINFO",
 #endif
+    "SSL_HANDSHAKE_RTT",
+    "SSL_CLIENTHELLO_VERSION",
+    "SSL_CLIENTHELLO_CIPHERS",
+    "SSL_CLIENTHELLO_EXTENSIONS",
+    "SSL_CLIENTHELLO_GROUPS",
+    "SSL_CLIENTHELLO_EC_FORMATS",
+    "SSL_CLIENTHELLO_SIG_ALGOS",
+    "SSL_CLIENTHELLO_ALPN",
+    "SSL_CLIENTHELLO_VERSIONS",
     NULL
 };
 
@@ -2455,6 +2474,53 @@ int ssl_callback_ServerNameIndication(SSL *ssl, int *al, modssl_ctx_t *mctx)
 
 #if OPENSSL_VERSION_NUMBER >= 0x10101000L && !defined(LIBRESSL_VERSION_NUMBER)
 /*
+ * Copy data from clienthello for env vars use later
+ */
+static void copy_clienthello_vars(conn_rec *c, SSL *ssl)
+{
+    SSLConnRec *sslcon;
+    modssl_clienthello_vars *clienthello_vars;
+    const unsigned char *data;
+    int *ids;
+
+    sslcon = myConnConfig(c);
+
+    sslcon->clienthello_vars = apr_pcalloc(c->pool, sizeof(*clienthello_vars));
+    clienthello_vars = sslcon->clienthello_vars;
+
+    clienthello_vars->version = SSL_client_hello_get0_legacy_version(ssl);
+    clienthello_vars->ciphers_len = SSL_client_hello_get0_ciphers(ssl, &data);
+    if (clienthello_vars->ciphers_len > 0) {
+        clienthello_vars->ciphers_data = apr_pmemdup(c->pool, data, clienthello_vars->ciphers_len);
+    }
+    if (SSL_client_hello_get1_extensions_present(ssl, &ids, &clienthello_vars->extids_len) == 1) {
+        if (clienthello_vars->extids_len > 0)
+            clienthello_vars->extids_data = apr_pmemdup(c->pool, ids, clienthello_vars->extids_len * sizeof(int));
+        OPENSSL_free(ids);
+    }
+    if (SSL_client_hello_get0_ext(ssl, TLSEXT_TYPE_supported_groups, &data, &clienthello_vars->ecgroups_len) == 1) {
+        if (clienthello_vars->ecgroups_len > 0)
+            clienthello_vars->ecgroups_data = apr_pmemdup(c->pool, data, clienthello_vars->ecgroups_len);
+    }
+    if (SSL_client_hello_get0_ext(ssl, TLSEXT_TYPE_ec_point_formats, &data, &clienthello_vars->ecformats_len) == 1) {
+        if (clienthello_vars->ecformats_len > 0)
+            clienthello_vars->ecformats_data = apr_pmemdup(c->pool, data, clienthello_vars->ecformats_len);
+    }
+    if (SSL_client_hello_get0_ext(ssl, TLSEXT_TYPE_signature_algorithms, &data, &clienthello_vars->sigalgos_len) == 1) {
+        if (clienthello_vars->sigalgos_len > 0)
+            clienthello_vars->sigalgos_data = apr_pmemdup(c->pool, data, clienthello_vars->sigalgos_len);
+    }
+    if (SSL_client_hello_get0_ext(ssl, TLSEXT_TYPE_application_layer_protocol_negotiation, &data, &clienthello_vars->alpn_len) == 1) {
+        if (clienthello_vars->alpn_len > 0)
+            clienthello_vars->alpn_data = apr_pmemdup(c->pool, data, clienthello_vars->alpn_len);
+    }
+    if (SSL_client_hello_get0_ext(ssl, TLSEXT_TYPE_supported_versions, &data, &clienthello_vars->versions_len) == 1) {
+        if (clienthello_vars->versions_len > 0)
+            clienthello_vars->versions_data = apr_pmemdup(c->pool, data, clienthello_vars->versions_len);
+    }
+}
+
+/*
  * This callback function is called when the ClientHello is received.
  */
 int ssl_callback_ClientHello(SSL *ssl, int *al, void *arg)
@@ -2509,6 +2575,10 @@ int ssl_callback_ClientHello(SSL *ssl, int *al, void *arg)
 
 give_up:
     init_vhost(c, ssl, servername);
+    
+    if (mySrvConfigFromConn(c)->clienthello_vars == TRUE)
+        copy_clienthello_vars(c, ssl);
+
     return SSL_CLIENT_HELLO_SUCCESS;
 }
 #endif /* OPENSSL_VERSION_NUMBER < 0x10101000L */
@@ -2542,14 +2612,13 @@ static int ssl_find_vhost(void *servername, conn_rec *c, server_rec *s)
 #if OPENSSL_VERSION_NUMBER >= 0x1010007fL \
         && (!defined(LIBRESSL_VERSION_NUMBER) \
             || LIBRESSL_VERSION_NUMBER >= 0x20800000L)
-        /*
-         * Don't switch the protocol if none is configured for this vhost,
-         * the default in this case is still the base server's SSLProtocol.
-         */
-        if (myConnCtxConfig(c, sc)->protocol_set) {
-            SSL_set_min_proto_version(ssl, SSL_CTX_get_min_proto_version(ctx));
-            SSL_set_max_proto_version(ssl, SSL_CTX_get_max_proto_version(ctx));
-        }
+         /* Switch to the vhost's protocols. Note that 2.4 used to do this
+          * only if SSLProtocol was configured/inherited for this vhost, using
+          * the base server's SSLProtocol otherwise. From 2.5 usual merging
+          * applies.
+          */
+        SSL_set_min_proto_version(ssl, SSL_CTX_get_min_proto_version(ctx));
+        SSL_set_max_proto_version(ssl, SSL_CTX_get_max_proto_version(ctx));
 #endif
         if ((SSL_get_verify_mode(ssl) == SSL_VERIFY_NONE) ||
             (SSL_num_renegotiations(ssl) == 0)) {
@@ -2574,7 +2643,9 @@ static int ssl_find_vhost(void *servername, conn_rec *c, server_rec *s)
          * a renegotiation.
          */
         if (SSL_num_renegotiations(ssl) == 0) {
-            SSL_set_session_id_context(ssl, sc->vhost_md5, APR_MD5_DIGESTSIZE*2);
+            if(!SSL_set_session_id_context(ssl, sc->vhost_md5, APR_MD5_DIGESTSIZE*2)) {
+              return 0;
+            }
         }
 
         /*
@@ -2587,6 +2658,7 @@ static int ssl_find_vhost(void *servername, conn_rec *c, server_rec *s)
             sc->server->pks->service_unavailable : 0; 
         
         ap_update_child_status_from_server(c->sbh, SERVER_BUSY_READ, c, s);
+
         /*
          * There is one special filter callback, which is set
          * very early depending on the base_server's log level.
@@ -2594,16 +2666,7 @@ static int ssl_find_vhost(void *servername, conn_rec *c, server_rec *s)
          * (and the first vhost doesn't use APLOG_TRACE4), then
          * we need to set that callback here.
          */
-        if (APLOGtrace4(s)) {
-            BIO *rbio = SSL_get_rbio(ssl),
-                *wbio = SSL_get_wbio(ssl);
-            BIO_set_callback(rbio, ssl_io_data_cb);
-            BIO_set_callback_arg(rbio, (void *)ssl);
-            if (wbio && wbio != rbio) {
-                BIO_set_callback(wbio, ssl_io_data_cb);
-                BIO_set_callback_arg(wbio, (void *)ssl);
-            }
-        }
+        modssl_set_io_callbacks(ssl, c, s);
 
         return 1;
     }

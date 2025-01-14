@@ -84,10 +84,12 @@ static md_mod_conf_t defmc = {
     "crt.sh",                  /* default cert checker site name */
     "https://crt.sh?q=",       /* default cert checker site url */
     NULL,                      /* CA cert file to use */
+    apr_time_from_sec(MD_SECS_PER_DAY/2), /* default time between cert checks */
     apr_time_from_sec(5),      /* minimum delay for retries */
     13,                        /* retry_failover after 14 errors, with 5s delay ~ half a day */
     0,                         /* store locks, disabled by default */
     apr_time_from_sec(5),      /* max time to wait to obaint a store lock */
+    MD_MATCH_ALL,              /* match vhost severname and aliases */
 };
 
 static md_timeslice_t def_renew_window = {
@@ -120,6 +122,7 @@ static md_srv_conf_t defconf = {
     NULL,                      /* ca eab hmac */
     0,                         /* stapling */
     1,                         /* staple others */
+    NULL,                      /* dns01_cmd */
     NULL,                      /* currently defined md */
     NULL,                      /* assigned md, post config */
     0,                         /* is_ssl, set during mod_ssl post_config */
@@ -174,6 +177,7 @@ static void srv_conf_props_clear(md_srv_conf_t *sc)
     sc->ca_eab_hmac = NULL;
     sc->stapling = DEF_VAL;
     sc->staple_others = DEF_VAL;
+    sc->dns01_cmd = NULL;
 }
 
 static void srv_conf_props_copy(md_srv_conf_t *to, const md_srv_conf_t *from)
@@ -194,6 +198,7 @@ static void srv_conf_props_copy(md_srv_conf_t *to, const md_srv_conf_t *from)
     to->ca_eab_hmac = from->ca_eab_hmac;
     to->stapling = from->stapling;
     to->staple_others = from->staple_others;
+    to->dns01_cmd = from->dns01_cmd;
 }
 
 static void srv_conf_props_apply(md_t *md, const md_srv_conf_t *from, apr_pool_t *p)
@@ -217,6 +222,7 @@ static void srv_conf_props_apply(md_t *md, const md_srv_conf_t *from, apr_pool_t
     if (from->ca_eab_kid) md->ca_eab_kid = from->ca_eab_kid;
     if (from->ca_eab_hmac) md->ca_eab_hmac = from->ca_eab_hmac;
     if (from->stapling != DEF_VAL) md->stapling = from->stapling;
+    if (from->dns01_cmd) md->dns01_cmd = from->dns01_cmd;
 }
 
 void *md_config_create_svr(apr_pool_t *pool, server_rec *s)
@@ -262,6 +268,7 @@ static void *md_config_merge(apr_pool_t *pool, void *basev, void *addv)
     nsc->ca_eab_hmac = add->ca_eab_hmac? add->ca_eab_hmac : base->ca_eab_hmac;
     nsc->stapling = (add->stapling != DEF_VAL)? add->stapling : base->stapling;
     nsc->staple_others = (add->staple_others != DEF_VAL)? add->staple_others : base->staple_others;
+    nsc->dns01_cmd = (add->dns01_cmd)? add->dns01_cmd : base->dns01_cmd;
     nsc->current = NULL;
     
     return nsc;
@@ -618,6 +625,24 @@ static const char *md_config_set_base_server(cmd_parms *cmd, void *dc, const cha
     return set_on_off(&config->mc->manage_base_server, value, cmd->pool);
 }
 
+static const char *md_config_set_check_interval(cmd_parms *cmd, void *dc, const char *value)
+{
+    md_srv_conf_t *config = md_config_get(cmd->server);
+    const char *err = md_conf_check_location(cmd, MD_LOC_NOT_MD);
+    apr_time_t interval;
+
+    (void)dc;
+    if (err) return err;
+    if (md_duration_parse(&interval, value, "s") != APR_SUCCESS) {
+        return "unrecognized duration format";
+    }
+    if (interval < apr_time_from_sec(1)) {
+        return "check interval cannot be less than one second";
+    }
+    config->mc->check_interval = interval;
+    return NULL;
+}
+
 static const char *md_config_set_min_delay(cmd_parms *cmd, void *dc, const char *value)
 {
     md_srv_conf_t *config = md_config_get(cmd->server);
@@ -675,6 +700,27 @@ static const char *md_config_set_store_locks(cmd_parms *cmd, void *dc, const cha
     config->mc->use_store_locks = use_store_locks;
     if (wait_time) {
         config->mc->lock_wait_timeout = wait_time;
+    }
+    return NULL;
+}
+
+static const char *md_config_set_match_mode(cmd_parms *cmd, void *dc, const char *s)
+{
+    md_srv_conf_t *config = md_config_get(cmd->server);
+    const char *err = md_conf_check_location(cmd, MD_LOC_NOT_MD);
+
+    (void)dc;
+    if (err) {
+        return err;
+    }
+    else if (!apr_strnatcasecmp("all", s)) {
+        config->mc->match_mode = MD_MATCH_ALL;
+    }
+    else if (!apr_strnatcasecmp("servernames", s)) {
+        config->mc->match_mode = MD_MATCH_SERVERNAMES;
+    }
+    else {
+        return "invalid argument, must be a 'all' or 'servernames'";
     }
     return NULL;
 }
@@ -966,11 +1012,35 @@ static const char *md_config_set_dns01_cmd(cmd_parms *cmd, void *mconfig, const 
     md_srv_conf_t *sc = md_config_get(cmd->server);
     const char *err;
 
+    if ((err = md_conf_check_location(cmd, MD_LOC_ALL))) {
+        return err;
+    }
+
+    if (inside_md_section(cmd)) {
+        sc->dns01_cmd = arg;
+    } else {
+        apr_table_set(sc->mc->env, MD_KEY_CMD_DNS01, arg);
+    }
+
+    (void)mconfig;
+    return NULL;
+}
+
+static const char *md_config_set_dns01_version(cmd_parms *cmd, void *mconfig, const char *value)
+{
+    md_srv_conf_t *sc = md_config_get(cmd->server);
+    const char *err;
+
+    (void)mconfig;
     if ((err = md_conf_check_location(cmd, MD_LOC_NOT_MD))) {
         return err;
     }
-    apr_table_set(sc->mc->env, MD_KEY_CMD_DNS01, arg);
-    (void)mconfig;
+    if (!strcmp("1", value) || !strcmp("2", value)) {
+        apr_table_set(sc->mc->env, MD_KEY_DNS01_VERSION, value);
+    }
+    else {
+        return "Only versions `1` and `2` are supported";
+    }
     return NULL;
 }
 
@@ -1215,7 +1285,9 @@ const command_rec md_cmds[] = {
                   "Allow managing of base server outside virtual hosts."),
     AP_INIT_RAW_ARGS("MDChallengeDns01", md_config_set_dns01_cmd, NULL, RSRC_CONF, 
                   "Set the command for setup/teardown of dns-01 challenges"),
-    AP_INIT_TAKE1("MDCertificateFile", md_config_add_cert_file, NULL, RSRC_CONF, 
+    AP_INIT_TAKE1("MDChallengeDns01Version", md_config_set_dns01_version, NULL, RSRC_CONF,
+                  "Set the type of arguments to call `MDChallengeDns01` with"),
+    AP_INIT_TAKE1("MDCertificateFile", md_config_add_cert_file, NULL, RSRC_CONF,
                   "set the static certificate (chain) file to use for this domain."),
     AP_INIT_TAKE1("MDCertificateKeyFile", md_config_add_key_file, NULL, RSRC_CONF, 
                   "set the static private key file to use for this domain."),
@@ -1249,7 +1321,10 @@ const command_rec md_cmds[] = {
                   "The number of errors before a failover to another CA is triggered."),
     AP_INIT_TAKE1("MDStoreLocks", md_config_set_store_locks, NULL, RSRC_CONF,
                   "Configure locking of store for updates."),
-
+    AP_INIT_TAKE1("MDMatchNames", md_config_set_match_mode, NULL, RSRC_CONF,
+                  "Determines how DNS names are matched to vhosts."),
+    AP_INIT_TAKE1("MDCheckInterval", md_config_set_check_interval, NULL, RSRC_CONF,
+                  "Time between certificate checks."),
     AP_INIT_TAKE1(NULL, NULL, NULL, RSRC_CONF, NULL)
 };
 
