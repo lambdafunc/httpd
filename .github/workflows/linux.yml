@@ -50,10 +50,9 @@ jobs:
           - name: Shared MPMs, all-modules
             config: --enable-mods-shared=reallyall --enable-mpms-shared=all
           # -------------------------------------------------------------------------
-          ### uncomment this when there are enough arm64 runners
-          # - name: Shared MPMs, all-modules, 64-bit ARM
-          #  config: --enable-mods-shared=reallyall --enable-mpms-shared=all
-          #  os: ubuntu-22.04-arm64
+          - name: Shared MPMs, all-modules, 64-bit ARM
+            config: --enable-mods-shared=reallyall --enable-mpms-shared=all
+            os: ubuntu-24.04-arm
           # -------------------------------------------------------------------------
           - name: Event MPM, all-modules, mod_cgid only
             config: --enable-mods-shared=reallyall --with-mpm=event --disable-cgi
