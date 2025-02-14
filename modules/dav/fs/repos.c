@@ -35,6 +35,7 @@
 #include "mod_dav.h"
 #include "repos.h"
 
+APLOG_USE_MODULE(dav_fs);
 
 /* to assist in debugging mod_dav's GET handling */
 #define DEBUG_GET_HANDLER       0
@@ -140,11 +141,6 @@ enum {
 */
 #define DAV_PROPID_FS_executable        1
 
-/*
- * prefix for temporary files
- */
-#define DAV_FS_TMP_PREFIX ".davfs.tmp"
-
 static const dav_liveprop_spec dav_fs_props[] =
 {
     /* standard DAV properties */
@@ -171,6 +167,20 @@ static const dav_liveprop_spec dav_fs_props[] =
         "getlastmodified",
         DAV_PROPID_getlastmodified,
         0
+    },
+
+    /* RFC 4331 quotas */
+    {
+        DAV_FS_URI_DAV,
+        "quota-available-bytes",
+        DAV_PROPID_quota_available_bytes,
+        0,
+    },
+    {
+        DAV_FS_URI_DAV,
+        "quota-used-bytes",
+        DAV_PROPID_quota_used_bytes,
+        0,
     },
 
     /* our custom properties */
@@ -233,6 +243,24 @@ const char *dav_fs_pathname(const dav_resource *resource)
 {
     return resource->info->pathname;
 }
+
+const char *dav_fs_fname(const dav_resource *resource)
+{
+    return resource->info->finfo.fname;
+}
+
+apr_off_t dav_fs_size(const dav_resource *resource)
+{
+    apr_off_t size;
+
+    if ((resource->info->finfo.valid & APR_FINFO_SIZE))
+        size = resource->info->finfo.size;
+    else
+        size = DAV_FS_BYTES_ERROR;
+
+    return size;
+}
+
 
 dav_error * dav_fs_dir_file_name(
     const dav_resource *resource,
@@ -567,8 +595,13 @@ static dav_error *dav_fs_copymoveset(int is_move, apr_pool_t *p,
 
     /* Get directory and filename for resources */
     /* ### should test these result values... */
-    (void) dav_fs_dir_file_name(src, &src_dir, &src_file);
-    (void) dav_fs_dir_file_name(dst, &dst_dir, &dst_file);
+    err = dav_fs_dir_file_name(src, &src_dir, &src_file);
+    if (err != NULL)
+        return err;
+
+    err = dav_fs_dir_file_name(dst, &dst_dir, &dst_file);
+    if (err != NULL)
+        return err;
 
     /* Get the corresponding state files for each resource */
     dav_dbm_get_statefiles(p, src_file, &src_state1, &src_state2);
@@ -616,11 +649,14 @@ static dav_error *dav_fs_deleteset(apr_pool_t *p, const dav_resource *resource)
     const char *state1;
     const char *state2;
     const char *pathname;
+    dav_error *err;
     apr_status_t status;
 
     /* Get directory, filename, and state-file names for the resource */
     /* ### should test this result value... */
-    (void) dav_fs_dir_file_name(resource, &dirpath, &fname);
+    err = dav_fs_dir_file_name(resource, &dirpath, &fname);
+    if (err != NULL)
+        return err;
     dav_dbm_get_statefiles(p, fname, &state1, &state2);
 
     /* build the propset pathname for the file */
@@ -749,10 +785,10 @@ static dav_error * dav_fs_get_resource(
             {
                 /*
                 ** The base of the path refers to a file -- nothing should
-                ** be in path_info. The resource is simply an error: it
+                ** be in path_info. The resource cannot exist: it
                 ** can't be a null or a locknull resource.
                 */
-                return dav_new_error(r->pool, HTTP_BAD_REQUEST, 0, 0,
+                return dav_new_error(r->pool, HTTP_NOT_FOUND, 0, 0,
                                      "The URL contains extraneous path "
                                      "components. The resource could not "
                                      "be identified.");
@@ -1586,6 +1622,19 @@ static dav_error * dav_fs_walker(dav_fs_walker_context *fsctx, int depth)
         status = apr_stat(&fsctx->info1.finfo, fsctx->path1.buf,
                           DAV_FINFO_MASK, pool);
         if (status != APR_SUCCESS && status != APR_INCOMPLETE) {
+            dav_resource_private *ctx = params->root->info;
+
+            ap_log_rerror(APLOG_MARK, APLOG_ERR, status, ctx->r,
+                          APLOGNO(10472) "could not access file (%s) during directory walk",
+                          fsctx->path1.buf);
+
+            /* If being tolerant, ignore failure due to losing a race
+             * with some other process deleting files out from under
+             * the directory walk. */
+            if ((params->walk_type & DAV_WALKTYPE_TOLERANT)
+                && APR_STATUS_IS_ENOENT(status)) {
+                continue;
+            }
             /* woah! where'd it go? */
             /* ### should have a better error here */
             err = dav_new_error(pool, HTTP_NOT_FOUND, 0, status, NULL);
@@ -1927,6 +1976,7 @@ static dav_prop_insert dav_fs_insert_prop(const dav_resource *resource,
     apr_pool_t *p = resource->info->pool;
     const dav_liveprop_spec *info;
     long global_ns;
+    apr_off_t bytes;
 
     /* an HTTP-date can be 29 chars plus a null term */
     /* a 64-bit size can be 20 chars plus a null term */
@@ -1990,6 +2040,26 @@ static dav_prop_insert dav_fs_insert_prop(const dav_resource *resource,
             value = "T";
         else
             value = "F";
+        break;
+
+    case DAV_PROPID_quota_available_bytes:
+        bytes = dav_fs_get_available_bytes(dav_fs_get_request_rec(resource),
+                                           dav_fs_fname(resource), NULL);
+        if (bytes == DAV_FS_BYTES_ERROR)
+            return DAV_PROP_INSERT_NOTDEF;
+
+        apr_snprintf(buf, sizeof(buf), "%" APR_OFF_T_FMT, bytes);
+        value = buf;
+        break;
+
+    case DAV_PROPID_quota_used_bytes:
+        bytes = dav_fs_get_used_bytes(dav_fs_get_request_rec(resource),
+                                           dav_fs_fname(resource));
+        if (bytes == DAV_FS_BYTES_ERROR)
+            return DAV_PROP_INSERT_NOTDEF;
+
+        apr_snprintf(buf, sizeof(buf), "%" APR_OFF_T_FMT, bytes);
+        value = buf;
         break;
 
     default:
@@ -2256,7 +2326,34 @@ void dav_fs_insert_all_liveprops(request_rec *r, const dav_resource *resource,
                               what, phdr);
 #endif
 
+    /*
+     * RFC 4331 section 2 says quota live properties should not
+     * be returned by <DAV:allprop> PROPFIND, hence we skip
+     " DAV_PROPID_quota_available_bytes and DAV_PROPID_quota_used_bytes.
+     */
+
     /* ### we know the others aren't defined as liveprops */
+}
+
+int dav_fs_method_precondition(request_rec *r,
+                               dav_resource *src, const dav_resource *dst,
+                               const apr_xml_doc *doc, dav_error **err)
+{
+    int ret = DECLINED;
+
+    switch (r->method_number) {
+    case M_COPY: /* FALLTHROUGH */
+    case M_MOVE: /* FALLTHROUGH */
+    case M_MKCOL: /* FALLTHROUGH */
+    case M_PROPPATCH: /* FALLTHROUGH */
+    case M_PUT:
+        ret = dav_fs_quota_precondition(r, src, dst, doc, err);
+        break;
+    default:
+        break;
+    }
+
+    return ret;
 }
 
 void dav_fs_register(apr_pool_t *p)

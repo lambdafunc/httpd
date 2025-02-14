@@ -39,7 +39,14 @@ typedef enum {
     MD_CONFIG_MESSGE_CMD,
     MD_CONFIG_STAPLING,
     MD_CONFIG_STAPLE_OTHERS,
+    MD_CONFIG_CA_PROFILE,
+    MD_CONFIG_CA_PROFILE_MANDATORY,
 } md_config_var_t;
+
+typedef enum {
+    MD_MATCH_ALL,
+    MD_MATCH_SERVERNAMES,
+} md_match_mode_t;
 
 typedef struct md_mod_conf_t md_mod_conf_t;
 struct md_mod_conf_t {
@@ -70,10 +77,12 @@ struct md_mod_conf_t {
     const char *cert_check_name;       /* name of the linked certificate check site */
     const char *cert_check_url;        /* url "template for" checking a certificate */
     const char *ca_certs;              /* root certificates to use for connections */
+    apr_time_t check_interval;         /* duration between cert renewal checks */
     apr_time_t min_delay;              /* minimum delay for retries */
     int retry_failover;                /* number of errors to trigger CA failover */
     int use_store_locks;               /* use locks when updating store */
     apr_time_t lock_wait_timeout;      /* fail after this time when unable to obtain lock */
+    md_match_mode_t match_mode;        /* how dns names are match to vhosts */
 };
 
 typedef struct md_srv_conf_t {
@@ -96,9 +105,13 @@ typedef struct md_srv_conf_t {
     struct apr_array_header_t *ca_challenges; /* challenge types configured */
     const char *ca_eab_kid;            /* != NULL, external account binding keyid */
     const char *ca_eab_hmac;           /* != NULL, external account binding hmac */
+    const char *profile;               /* != NULL, ACME order profile */
+    int profile_mandatory;             /* if ACME profile, when set, is mandatory */
 
     int stapling;                      /* OCSP stapling enabled */
     int staple_others;                 /* Provide OCSP stapling for non-MD certificates */
+
+    const char *dns01_cmd;             /* DNS challenge command, override global command */
 
     md_t *current;                     /* md currently defined in <MDomainSet xxx> section */
     struct apr_array_header_t *assigned; /* post_config: MDs that apply to this server */

@@ -519,7 +519,7 @@ if test "$ac_cv_search_crypt" != "no"; then
 ]], [char *result = crypt(PASSWD_0, SALT_0);
      if (!result) return 1;
      if (strcmp(result, EXPECT_0)) return 2;
-])], [ap_cv_crypt_sha2=yes], [ap_cv_crypt_sha2=no])])
+])], [ap_cv_crypt_sha2=yes], [ap_cv_crypt_sha2=no], [ap_cv_crypt_sha2=no])])
    if test "$ap_cv_crypt_sha2" = yes; then
      AC_DEFINE([HAVE_CRYPT_SHA2], 1, [Define if crypt() supports SHA-2 hashes])
    fi
@@ -561,6 +561,12 @@ pid_t t = syscall(SYS_gettid); return t == -1 ? 1 : 0; },
       AC_DEFINE(HAVE_SYS_GETTID, 1, [Define if you have gettid() via syscall()])
   fi
 fi
+
+case ${host}X${ac_cv_func_gettid}X${ap_cv_gettid} in
+*linux-*XyesX* | *linux-*XnoXyes)
+     AC_DEFINE(DEFAULT_LOG_TID, ["g"], [Define as default argument for thread id in error logging])
+     ;;
+esac
 
 dnl ## Check for the tm_gmtoff field in struct tm to get the timezone diffs
 AC_CACHE_CHECK([for tm_gmtoff in struct tm], ac_cv_struct_tm_gmtoff,
@@ -999,6 +1005,7 @@ APACHE_FAST_OUTPUT(support/Makefile)
 if test -d ./test; then
     APACHE_FAST_OUTPUT(test/Makefile)
     AC_CONFIG_FILES([test/pyhttpd/config.ini])
+    APACHE_FAST_OUTPUT(test/clients/Makefile)
 fi
 
 dnl ## Finalize the variables

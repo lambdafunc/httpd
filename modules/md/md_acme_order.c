@@ -226,32 +226,33 @@ static apr_status_t p_purge(void *baton, apr_pool_t *p, apr_pool_t *ptemp, va_li
     md_store_t *store = baton;
     md_acme_order_t *order;
     md_store_group_t group;
-    const char *md_name, *setup_token;
+    const md_t *md;
+    const char *setup_token;
     apr_table_t *env;
     int i;
 
     group = (md_store_group_t)va_arg(ap, int);
-    md_name = va_arg(ap, const char *);
+    md = va_arg(ap, const md_t *);
     env = va_arg(ap, apr_table_t *);
 
-    if (APR_SUCCESS == md_acme_order_load(store, group, md_name, &order, p)) {
-        md_log_perror(MD_LOG_MARK, MD_LOG_DEBUG, 0, p, "order loaded for %s", md_name);
+    if (APR_SUCCESS == md_acme_order_load(store, group, md->name, &order, p)) {
+        md_log_perror(MD_LOG_MARK, MD_LOG_DEBUG, 0, p, "order loaded for %s", md->name);
         for (i = 0; i < order->challenge_setups->nelts; ++i) {
             setup_token = APR_ARRAY_IDX(order->challenge_setups, i, const char*);
             if (setup_token) {
                 md_log_perror(MD_LOG_MARK, MD_LOG_DEBUG, 0, p, 
                               "order teardown setup %s", setup_token);
-                md_acme_authz_teardown(store, setup_token, md_name, env, p);
+                md_acme_authz_teardown(store, setup_token, md, env, p);
             }
         }
     }
-    return md_store_remove(store, group, md_name, MD_FN_ORDER, ptemp, 1);
+    return md_store_remove(store, group, md->name, MD_FN_ORDER, ptemp, 1);
 }
 
 apr_status_t md_acme_order_purge(md_store_t *store, apr_pool_t *p, md_store_group_t group,
-                                 const char *md_name, apr_table_t *env)
+                                 const md_t *md, apr_table_t *env)
 {
-    return md_util_pool_vdo(p_purge, store, p, group, md_name, env, NULL);
+    return md_util_pool_vdo(p_purge, store, p, group, md, env, NULL);
 }
 
 /**************************************************************************************************/
@@ -262,13 +263,14 @@ typedef struct {
     md_acme_order_t *order;
     md_acme_t *acme;
     const char *name;
+    const char *profile;
     apr_array_header_t *domains;
     md_result_t *result;
 } order_ctx_t;
 
-#define ORDER_CTX_INIT(ctx, p, o, a, n, d, r) \
+#define ORDER_CTX_INIT(ctx, p, o, a, n, d, pf, r) \
     (ctx)->p = (p); (ctx)->order = (o); (ctx)->acme = (a); \
-    (ctx)->name = (n); (ctx)->domains = d; (ctx)->result = r
+    (ctx)->name = (n); (ctx)->domains = d; (ctx)->profile = pf; (ctx)->result = r
 
 static apr_status_t identifier_to_json(void *value, md_json_t *json, apr_pool_t *p, void *baton)
 {
@@ -288,6 +290,8 @@ static apr_status_t on_init_order_register(md_acme_req_t *req, void *baton)
 
     jpayload = md_json_create(req->p);
     md_json_seta(ctx->domains, identifier_to_json, NULL, jpayload, "identifiers", NULL);
+    if (ctx->profile)
+      md_json_sets(ctx->profile, jpayload, "profile", NULL);
 
     return md_acme_req_body_init(req, jpayload);
 } 
@@ -320,13 +324,14 @@ out:
 }
 
 apr_status_t md_acme_order_register(md_acme_order_t **porder, md_acme_t *acme, apr_pool_t *p, 
-                                    const char *name, apr_array_header_t *domains)
+                                    const char *name, apr_array_header_t *domains,
+                                    const char *profile)
 {
     order_ctx_t ctx;
     apr_status_t rv;
     
     assert(MD_ACME_VERSION_MAJOR(acme->version) > 1);
-    ORDER_CTX_INIT(&ctx, p, NULL, acme, name, domains, NULL);
+    ORDER_CTX_INIT(&ctx, p, NULL, acme, name, domains, profile, NULL);
     rv = md_acme_POST(acme, acme->api.v2.new_order, on_init_order_register, on_order_upd, NULL, NULL, &ctx);
     *porder = (APR_SUCCESS == rv)? ctx.order : NULL;
     return rv;
@@ -339,7 +344,7 @@ apr_status_t md_acme_order_update(md_acme_order_t *order, md_acme_t *acme,
     apr_status_t rv;
     
     assert(MD_ACME_VERSION_MAJOR(acme->version) > 1);
-    ORDER_CTX_INIT(&ctx, p, order, acme, NULL, NULL, result);
+    ORDER_CTX_INIT(&ctx, p, order, acme, NULL, NULL, NULL, result);
     rv = md_acme_GET(acme, order->url, NULL, on_order_upd, NULL, NULL, &ctx);
     if (APR_SUCCESS != rv && APR_SUCCESS != acme->last->status) {
         md_result_dup(result, acme->last);
@@ -379,7 +384,7 @@ apr_status_t md_acme_order_await_ready(md_acme_order_t *order, md_acme_t *acme,
     apr_status_t rv;
     
     assert(MD_ACME_VERSION_MAJOR(acme->version) > 1);
-    ORDER_CTX_INIT(&ctx, p, order, acme, md->name, NULL, result);
+    ORDER_CTX_INIT(&ctx, p, order, acme, md->name, NULL, NULL, result);
 
     md_result_activity_setn(result, "Waiting for order to become ready");
     rv = md_util_try(await_ready, &ctx, 0, timeout, 0, 0, 1);
@@ -422,7 +427,7 @@ apr_status_t md_acme_order_await_valid(md_acme_order_t *order, md_acme_t *acme,
     apr_status_t rv;
     
     assert(MD_ACME_VERSION_MAJOR(acme->version) > 1);
-    ORDER_CTX_INIT(&ctx, p, order, acme, md->name, NULL, result);
+    ORDER_CTX_INIT(&ctx, p, order, acme, md->name, NULL, NULL, result);
 
     md_result_activity_setn(result, "Waiting for finalized order to become valid");
     rv = md_util_try(await_valid, &ctx, 0, timeout, 0, 0, 1);
@@ -465,7 +470,7 @@ apr_status_t md_acme_order_start_challenges(md_acme_order_t *order, md_acme_t *a
                               md->name, authz->domain);
                 rv = md_acme_authz_respond(authz, acme, store, challenge_types,
                                            md->pks,
-                                           md->acme_tls_1_domains, md->name,
+                                           md->acme_tls_1_domains, md,
                                            env, p, &setup_token, result);
                 if (APR_SUCCESS != rv) {
                     goto leave;
@@ -536,8 +541,8 @@ static apr_status_t check_challenges(void *baton, int attempt)
             }
         }
         else {
-            md_result_printf(ctx->result, rv, "authorization retrieval failed for domain %s", 
-                             authz->domain);
+            md_result_printf(ctx->result, rv, "authorization retrieval failed for %s on <%s>",
+                             ctx->name, url);
         }
     }
 leave:
@@ -551,7 +556,7 @@ apr_status_t md_acme_order_monitor_authzs(md_acme_order_t *order, md_acme_t *acm
     order_ctx_t ctx;
     apr_status_t rv;
     
-    ORDER_CTX_INIT(&ctx, p, order, acme, md->name, NULL, result);
+    ORDER_CTX_INIT(&ctx, p, order, acme, md->name, NULL, NULL, result);
     
     md_result_activity_printf(result, "Monitoring challenge status for %s", md->name);
     rv = md_util_try(check_challenges, &ctx, 0, timeout, 0, 0, 1);

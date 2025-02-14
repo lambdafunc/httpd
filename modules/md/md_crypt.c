@@ -32,6 +32,9 @@
 #include <openssl/rand.h>
 #include <openssl/rsa.h>
 #include <openssl/x509v3.h>
+#if OPENSSL_VERSION_NUMBER >= 0x30000000L
+#include <openssl/core_names.h>
+#endif
 
 #include "md.h"
 #include "md_crypt.h"
@@ -54,22 +57,16 @@
 #include <process.h>
 #endif
 
-#if defined(LIBRESSL_VERSION_NUMBER)
-/* Missing from LibreSSL */
-#define MD_USE_OPENSSL_PRE_1_1_API (LIBRESSL_VERSION_NUMBER < 0x2070000f)
-#else /* defined(LIBRESSL_VERSION_NUMBER) */
-#define MD_USE_OPENSSL_PRE_1_1_API (OPENSSL_VERSION_NUMBER < 0x10100000L)
-#endif
-
-#if defined(LIBRESSL_VERSION_NUMBER) || (OPENSSL_VERSION_NUMBER < 0x10100000L) 
-/* Missing from LibreSSL and only available since OpenSSL v1.1.x */
-#ifndef OPENSSL_NO_CT
-#define OPENSSL_NO_CT
-#endif
-#endif
-
-#ifndef OPENSSL_NO_CT
+#if !defined(OPENSSL_NO_CT) \
+    && OPENSSL_VERSION_NUMBER >= 0x10100000L \
+    && (!defined(LIBRESSL_VERSION_NUMBER) \
+        || LIBRESSL_VERSION_NUMBER >= 0x3050000fL)
+/* Missing from LibreSSL < 3.5.0 and only available since OpenSSL v1.1.x */
 #include <openssl/ct.h>
+#define MD_HAVE_CT 1
+#endif
+#ifndef MD_HAVE_CT
+#define MD_HAVE_CT 0
 #endif
 
 static int initialized;
@@ -210,7 +207,8 @@ static int pem_passwd(char *buf, int size, int rwflag, void *baton)
  */
 static apr_time_t md_asn1_time_get(const ASN1_TIME* time)
 {
-#if OPENSSL_VERSION_NUMBER < 0x10002000L || defined(LIBRESSL_VERSION_NUMBER)
+#if OPENSSL_VERSION_NUMBER < 0x10002000L || (defined(LIBRESSL_VERSION_NUMBER) && \
+                                             LIBRESSL_VERSION_NUMBER < 0x3060000fL)
     /* courtesy: https://stackoverflow.com/questions/10975542/asn1-time-to-time-t-conversion#11263731
      * all bugs are mine */
     apr_time_exp_t t;
@@ -854,7 +852,8 @@ static apr_status_t gen_ec(md_pkey_t **ppkey, apr_pool_t *p, const char *curve)
         curve = EC_curve_nid2nist(curve_nid);
     }
 #endif
-#if defined(NID_X25519) && !defined(LIBRESSL_VERSION_NUMBER)
+#if defined(NID_X25519) && (!defined(LIBRESSL_VERSION_NUMBER) || \
+                            LIBRESSL_VERSION_NUMBER >= 0x3070000fL)
     if (NID_undef == curve_nid && !apr_strnatcasecmp("X25519", curve)) {
         curve_nid = NID_X25519;
         curve = EC_curve_nid2nist(curve_nid);
@@ -872,7 +871,8 @@ static apr_status_t gen_ec(md_pkey_t **ppkey, apr_pool_t *p, const char *curve)
     *ppkey = make_pkey(p);
     switch (curve_nid) {
 
-#if defined(NID_X25519) && !defined(LIBRESSL_VERSION_NUMBER)
+#if defined(NID_X25519) && (!defined(LIBRESSL_VERSION_NUMBER) || \
+                            LIBRESSL_VERSION_NUMBER >= 0x3070000fL)
     case NID_X25519:
         /* no parameters */
         if (NULL == (ctx = EVP_PKEY_CTX_new_id(EVP_PKEY_X25519, NULL))
@@ -949,12 +949,9 @@ apr_status_t md_pkey_gen(md_pkey_t **ppkey, apr_pool_t *p, md_pkey_spec_t *spec)
     }
 }
 
-#if MD_USE_OPENSSL_PRE_1_1_API || (defined(LIBRESSL_VERSION_NUMBER) && \
-                                   LIBRESSL_VERSION_NUMBER < 0x2070000f)
-
-#ifndef NID_tlsfeature
-#define NID_tlsfeature          1020
-#endif
+#if OPENSSL_VERSION_NUMBER < 0x10100000L \
+    || (defined(LIBRESSL_VERSION_NUMBER) \
+        && LIBRESSL_VERSION_NUMBER < 0x2070000f)
 
 static void RSA_get0_key(const RSA *r,
                          const BIGNUM **n, const BIGNUM **e, const BIGNUM **d)
@@ -985,26 +982,64 @@ static const char *bn64(const BIGNUM *b, apr_pool_t *p)
 
 const char *md_pkey_get_rsa_e64(md_pkey_t *pkey, apr_pool_t *p)
 {
-    const BIGNUM *e;
+    const char *e64 = NULL;
+
+#if OPENSSL_VERSION_NUMBER < 0x30000000L
+
+#if OPENSSL_VERSION_NUMBER < 0x10101000L
     RSA *rsa = EVP_PKEY_get1_RSA(pkey->pkey);
-    
-    if (!rsa) {
-        return NULL;
+#else
+    const RSA *rsa = EVP_PKEY_get0_RSA(pkey->pkey);
+#endif
+    if (rsa) {
+        const BIGNUM *e;
+        RSA_get0_key(rsa, NULL, &e, NULL);
+        e64 = bn64(e, p);
+#if OPENSSL_VERSION_NUMBER < 0x10101000L
+        RSA_free(rsa);
+#endif
     }
-    RSA_get0_key(rsa, NULL, &e, NULL);
-    return bn64(e, p);
+
+#else /* OPENSSL_VERSION_NUMBER >= 0x30000000L */
+    BIGNUM *e = NULL;
+    if (EVP_PKEY_get_bn_param(pkey->pkey, OSSL_PKEY_PARAM_RSA_E, &e)) {
+        e64 = bn64(e, p);
+        BN_free(e);
+    }
+#endif
+
+    return e64;
 }
 
 const char *md_pkey_get_rsa_n64(md_pkey_t *pkey, apr_pool_t *p)
 {
-    const BIGNUM *n;
+    const char *n64 = NULL;
+
+#if OPENSSL_VERSION_NUMBER < 0x30000000L
+
+#if OPENSSL_VERSION_NUMBER < 0x10101000L
     RSA *rsa = EVP_PKEY_get1_RSA(pkey->pkey);
-    
-    if (!rsa) {
-        return NULL;
+#else
+    const RSA *rsa = EVP_PKEY_get0_RSA(pkey->pkey);
+#endif
+    if (rsa) {
+        const BIGNUM *n;
+        RSA_get0_key(rsa, &n, NULL, NULL);
+        n64 = bn64(n, p);
+#if OPENSSL_VERSION_NUMBER < 0x10101000L
+        RSA_free(rsa);
+#endif
     }
-    RSA_get0_key(rsa, &n, NULL, NULL);
-    return bn64(n, p);
+
+#else /* OPENSSL_VERSION_NUMBER >= 0x30000000L */
+    BIGNUM *n = NULL;
+    if (EVP_PKEY_get_bn_param(pkey->pkey, OSSL_PKEY_PARAM_RSA_N, &n)) {
+        n64 = bn64(n, p);
+        BN_free(n);
+    }
+#endif
+
+    return n64;
 }
 
 apr_status_t md_crypt_sign64(const char **psign64, md_pkey_t *pkey, apr_pool_t *p, 
@@ -1254,6 +1289,18 @@ int md_cert_covers_md(md_cert_t *cert, const md_t *md)
         md_log_perror(MD_LOG_MARK, MD_LOG_WARNING, 0, cert->pool, "cert has NO alt names");
     }
     return 0;
+}
+
+const char *md_cert_get_issuer_name(const md_cert_t *cert, apr_pool_t *p)
+{
+    X509_NAME *xname = X509_get_issuer_name(cert->x509);
+    if(xname) {
+      char *name, *s = X509_NAME_oneline(xname, NULL, 0);
+      name = apr_pstrdup(p, s);
+      OPENSSL_free(s);
+      return name;
+    }
+    return NULL;
 }
 
 apr_status_t md_cert_get_issuers_uri(const char **puri, const md_cert_t *cert, apr_pool_t *p)
@@ -2028,11 +2075,10 @@ out:
     return rv;
 }
 
+#if MD_HAVE_CT
 #define MD_OID_CT_SCTS_NUM          "1.3.6.1.4.1.11129.2.4.2"
 #define MD_OID_CT_SCTS_SNAME        "CT-SCTs"
 #define MD_OID_CT_SCTS_LNAME        "CT Certificate SCTs" 
-
-#ifndef OPENSSL_NO_CT
 static int get_ct_scts_nid(void)
 {
     int nid = OBJ_txt2nid(MD_OID_CT_SCTS_NUM);
@@ -2056,7 +2102,7 @@ const char *md_nid_get_lname(int nid)
 
 apr_status_t md_cert_get_ct_scts(apr_array_header_t *scts, apr_pool_t *p, const md_cert_t *cert)
 {
-#ifndef OPENSSL_NO_CT
+#if MD_HAVE_CT
     int nid, i, idx, critical;
     STACK_OF(SCT) *sct_list;
     SCT *sct_handle;

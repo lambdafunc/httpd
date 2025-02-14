@@ -18,7 +18,7 @@ class TestWildcard:
         env.check_acme()
         env.clear_store()
         MDConf(env).install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
 
     @pytest.fixture(autouse=True, scope='function')
     def _method_scope(self, env, request):
@@ -37,13 +37,22 @@ class TestWildcard:
         conf.install()
 
         # restart, check that md is in store
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         env.check_md(domains)
         # await drive completion
         md = env.await_error(domain)
         assert md
         assert md['renewal']['errors'] > 0
         assert md['renewal']['last']['problem'] == 'challenge-mismatch'
+        #
+        env.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH10056"   # None of offered challenge types
+            ],
+            matches = [
+                r'.*problem\[challenge-mismatch\].*'
+            ]
+        )
 
     # test case: a wildcard certificate with ACMEv2, only dns-01 configured, invalid command path
     def test_md_720_002(self, env):
@@ -60,13 +69,23 @@ class TestWildcard:
         conf.install()
 
         # restart, check that md is in store
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         env.check_md(domains)
         # await drive completion
         md = env.await_error(domain)
         assert md
         assert md['renewal']['errors'] > 0
         assert md['renewal']['last']['problem'] == 'challenge-setup-failure'
+        #
+        env.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH10056"   # None of offered challenge types
+            ],
+            matches = [
+                r'.*problem\[challenge-setup-failure\].*',
+                r'.*setup command failed to execute.*'
+            ]
+        )
 
     # variation, invalid cmd path, other challenges still get certificate for non-wildcard
     def test_md_720_002b(self, env):
@@ -81,7 +100,7 @@ class TestWildcard:
         conf.install()
 
         # restart, check that md is in store
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         env.check_md(domains)
         # await drive completion
         assert env.await_completion([domain])
@@ -106,13 +125,22 @@ class TestWildcard:
         conf.install()
 
         # restart, check that md is in store
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         env.check_md(domains)
         # await drive completion
         md = env.await_error(domain)
         assert md
         assert md['renewal']['errors'] > 0
         assert md['renewal']['last']['problem'] == 'challenge-setup-failure'
+        #
+        env.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH10056"   # None of offered challenge types
+            ],
+            matches = [
+                r'.*problem\[challenge-setup-failure\].*'
+            ]
+        )
 
     # test case: a wildcard name certificate with ACMEv2, only dns-01 configured
     def test_md_720_004(self, env):
@@ -128,7 +156,7 @@ class TestWildcard:
         conf.install()
 
         # restart, check that md is in store
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         env.check_md(domains)
         # await drive completion
         assert env.await_completion([domain])
@@ -155,7 +183,7 @@ class TestWildcard:
         conf.install()
 
         # restart, check that md is in store
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         env.check_md(domains)
         # await drive completion
         assert env.await_completion([domain])
@@ -183,7 +211,7 @@ class TestWildcard:
         conf.install()
 
         # restart, check that md is in store
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         env.check_md(domains)
         # await drive completion
         assert env.await_completion([domain])
@@ -210,7 +238,7 @@ class TestWildcard:
         conf.install()
 
         # restart, check that md is in store
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         env.check_md(domains)
         # await drive completion
         assert env.await_completion([wwwdomain])
@@ -242,7 +270,7 @@ class TestWildcard:
             fd.write(content)
 
         # restart, check that md is in store
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         env.check_md(domains)
         # await drive completion
         assert env.await_completion([domain], restart=False)
@@ -250,5 +278,5 @@ class TestWildcard:
         r = env.curl_get(f"http://{domain}:{env.http_port}/.well-known/acme-challenge/123456")
         assert r.response['status'] == 200
         assert r.response['body'] == content
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         env.check_md_complete(domain)

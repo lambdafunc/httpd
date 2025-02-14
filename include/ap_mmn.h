@@ -711,7 +711,30 @@
  *                         Add ap_assign_request_line()
  * 20211221.7 (2.5.1-dev)  Add ap_h1_append_header()
  * 20211221.8 (2.5.1-dev)  Add ap_sb_get_child_thread()
- * 20211221.9 (2.5.1-dev)  Add additional hcmethod_t enums
+ * 20211221.9 (2.5.1-dev)  Add additional hcmethod_t enums and PROXY_WORKER_IS_ERROR
+ * 20211221.10 (2.5.1-dev) Add ap_proxy_canonenc_ex
+ * 20211221.11 (2.5.1-dev) Add AP_CTIME_OPTION_GMTOFF to util_time.h
+ * 20211221.12 (2.5.1-dev) Add cmd_parms->regex
+ * 20211221.13 (2.5.1-dev) Add hook token_checker to check for authorization other
+ *                         than username / password. Add autht_provider structure.
+ * 20211221.14 (2.5.1-dev) Add request_rec->final_resp_passed bit
+ * 20211221.15 (2.5.1-dev) Add ap_get_pollfd_from_conn()
+ * 20211221.16 (2.5.1-dev) Add ap_proxy_determine_address()
+ * 20211221.17 (2.5.1-dev) Add ap_proxy_worker_get_name()
+ * 20211221.18 (2.5.1-dev) Add ap_regexec_ex()
+ * 20211221.19 (2.5.1-dev) Add AP_REG_NOTEMPTY_ATSTART
+ * 20211221.20 (2.5.1-dev) Add CONN_STATE_ASYNC_WAITIO, CONN_STATE_KEEPALIVE
+ *                         and CONN_STATE_PROCESSING
+ * 20211221.21 (2.5.1-dev) Add wait_io field to struct process_score
+ * 20211221.22 (2.5.1-dev) Add AP_MPMQ_CAN_WAITIO
+ * 20211221.23 (2.5.1-dev) Add ap_set_content_type_ex(), ap_filepath_merge(),
+ *                         and AP_REQUEST_TRUSTED_CT BNOTE.
+ * 20211221.24 (2.5.1-dev) Add ap_proxy_fixup_uds_filename()
+ * 20211221.25 (2.5.1-dev) AP_SLASHES and AP_IS_SLASH
+ * 20211221.26 (2.5.1-dev) Add is_host_matchable to proxy_worker_shared
+ * 20211221.27 (2.5.1-dev) Add sock_proto to proxy_worker_shared, and AP_LISTEN_MPTCP
+ * 20211221.28 (2.5.1-dev) Add dav_get_base_path() to mod_dav
+ * 20211221.29 (2.5.1-dev) Add ap_set_time_process_request() to scoreboard.h
  */
 
 #define MODULE_MAGIC_COOKIE 0x41503235UL /* "AP25" */
@@ -719,7 +742,7 @@
 #ifndef MODULE_MAGIC_NUMBER_MAJOR
 #define MODULE_MAGIC_NUMBER_MAJOR 20211221
 #endif
-#define MODULE_MAGIC_NUMBER_MINOR 9             /* 0...n */
+#define MODULE_MAGIC_NUMBER_MINOR 29             /* 0...n */
 
 /**
  * Determine if the server's current MODULE_MAGIC_NUMBER is at least a

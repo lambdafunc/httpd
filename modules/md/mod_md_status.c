@@ -325,7 +325,7 @@ static void si_val_valid_time(status_ctx *ctx, md_json_t *mdj, const status_info
             apr_pstrcat(ctx->p, info->label, "From", NULL));
         }
         if (until) {
-            print_date(ctx, from,
+            print_date(ctx, until,
             apr_pstrcat(ctx->p, info->label, "Until", NULL));
         }
     }
@@ -617,7 +617,7 @@ static void si_val_stapling(status_ctx *ctx, md_json_t *mdj, const status_info *
         apr_brigade_puts(ctx->bb, NULL, NULL, "on");
     }
     else {
-        apr_brigade_printf(ctx->bb, NULL, NULL, "%s: on", ctx->prefix);
+        apr_brigade_printf(ctx->bb, NULL, NULL, "%sStapling: on\n", ctx->prefix);
     }
 }
 

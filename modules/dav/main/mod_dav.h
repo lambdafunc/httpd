@@ -436,6 +436,11 @@ typedef struct dav_locktoken dav_locktoken;
 DAV_DECLARE(dav_error *) dav_get_resource(request_rec *r, int label_allowed,
                                           int use_checked_in, dav_resource **res_p);
 
+/*
+** If DavBasePath is configured for the request location, return the
+** configured path, otherwise NULL.
+*/
+DAV_DECLARE(const char *) dav_get_base_path(request_rec *r);
 
 /* --------------------------------------------------------------------
 **
@@ -1172,6 +1177,10 @@ enum {
     DAV_PROPID_workspace,
     DAV_PROPID_workspace_checkout_set,
 
+    /* RFC 4331 quotas */
+    DAV_PROPID_quota_available_bytes,
+    DAV_PROPID_quota_used_bytes,
+
     DAV_PROPID_END
 };
 
@@ -1321,6 +1330,7 @@ struct dav_hooks_propdb
 #define DAV_TIMEOUT_INFINITE 0
 
 DAV_DECLARE(time_t) dav_get_timeout(request_rec *r);
+DAV_DECLARE(time_t) dav_get_timeout_string(request_rec *r, const char *s);
 
 /*
 ** Opaque, provider-specific information for a lock database.
@@ -1829,6 +1839,7 @@ typedef struct
 #define DAV_WALKTYPE_AUTH       0x0001  /* limit to authorized files */
 #define DAV_WALKTYPE_NORMAL     0x0002  /* walk normal files */
 #define DAV_WALKTYPE_LOCKNULL   0x0004  /* walk locknull resources */
+#define DAV_WALKTYPE_TOLERANT   0x0008  /* tolerate non-fatal errors */
 
     /* callback function and a client context for the walk */
     dav_error * (*func)(dav_walk_resource *wres, int calltype);
@@ -2649,6 +2660,17 @@ typedef struct {
     const dav_hooks_liveprop *provider;  /* the provider defining this prop */
 } dav_elem_private;
 
+
+/* MS-WDV combined operation handler */
+DAV_DECLARE(int) dav_mswdv_preprocessing(request_rec *r);
+DAV_DECLARE(dav_error *) dav_mswdv_postprocessing(request_rec *r);
+DAV_DECLARE(apr_status_t) dav_mswdv_output(ap_filter_t *f,
+                                           apr_bucket_brigade *bb);
+DAV_DECLARE(apr_status_t) dav_mswdv_input(ap_filter_t *f,
+                                          apr_bucket_brigade *bb,
+                                          ap_input_mode_t mode,
+                                          apr_read_type_e block,
+                                          apr_off_t readbytes);
 
 /* --------------------------------------------------------------------
 **

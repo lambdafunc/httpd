@@ -45,10 +45,16 @@ class TestNotify:
         self.configure_httpd(env, self.domain, f"""
             MDNotifyCmd {command} {args}
             """)
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         assert env.await_error(self.domain)
         stat = env.get_md_status(self.domain)
         assert stat["renewal"]["last"]["problem"] == "urn:org:apache:httpd:log:AH10108:"
+        #
+        env.httpd_error_log.ignore_recent(
+            matches = [
+                r'.*urn:org:apache:httpd:log:AH10108:.*'
+            ]
+        )
 
     # test: valid notify cmd that fails, check error
     def test_md_900_002(self, env):
@@ -57,10 +63,18 @@ class TestNotify:
         self.configure_httpd(env, self.domain, f"""
             MDNotifyCmd {command} {args}
             """)
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         assert env.await_error(self.domain)
         stat = env.get_md_status(self.domain)
         assert stat["renewal"]["last"]["problem"] == "urn:org:apache:httpd:log:AH10108:"
+        #
+        env.httpd_error_log.ignore_recent(
+            matches = [
+                r'.*urn:org:apache:httpd:log:AH10108:.*',
+                r'.*urn:org:apache:httpd:log:AH10109:.*'
+                r'.*problem\[challenge-setup-failure\].*',
+            ]
+        )
 
     # test: valid notify that logs to file
     def test_md_900_010(self, env):
@@ -69,7 +83,7 @@ class TestNotify:
         self.configure_httpd(env, self.domain, f"""
             MDNotifyCmd {command} {args}
             """)
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         assert env.await_completion([self.domain], restart=False)
         time.sleep(1)
         stat = env.get_md_status(self.domain)
@@ -88,7 +102,7 @@ class TestNotify:
         self.configure_httpd(env, self.domain, f"""
             MDNotifyCmd {command} {args} {extra_arg}
             """)
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         assert env.await_completion([self.domain], restart=False)
         time.sleep(1)
         stat = env.get_md_status(self.domain)
@@ -111,7 +125,7 @@ class TestNotify:
         conf.add_vhost(domains1)
         conf.add_vhost(domains2)
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         assert env.await_completion([md1, md2], restart=False)
         time.sleep(1)
         stat = env.get_md_status(md1)

@@ -25,6 +25,10 @@
 #include "apr_general.h"        /* for signal stuff */
 #include "apr_strings.h"
 #include "apr_errno.h"
+#include "apu_version.h"
+#if (APU_MAJOR_VERSION == 1 && APU_MINOR_VERSION >= 7)
+#include "apu_errno.h"
+#endif
 #include "apr_thread_proc.h"
 #include "apr_lib.h"
 #include "apr_signal.h"
@@ -68,6 +72,10 @@
 /* we know core's module_index is 0 */
 #undef APLOG_MODULE_INDEX
 #define APLOG_MODULE_INDEX AP_CORE_MODULE_INDEX
+
+#ifndef DEFAULT_LOG_TID
+#define DEFAULT_LOG_TID NULL
+#endif
 
 typedef struct {
     const char *t_name;
@@ -573,14 +581,32 @@ static int log_ctime(const ap_errorlog_info *info, const char *arg,
     int time_len = buflen;
     int option = AP_CTIME_OPTION_NONE;
 
-    while (arg && *arg) {
-        switch (*arg) {
-            case 'u':   option |= AP_CTIME_OPTION_USEC;
-                        break;
-            case 'c':   option |= AP_CTIME_OPTION_COMPACT;
-                        break;
+    if (arg) {
+        if (arg[0] == 'u' && !arg[1]) { /* no ErrorLogFormat (fast path) */
+            option |= AP_CTIME_OPTION_USEC;
         }
-        arg++;
+        else if (!ap_strchr_c(arg, '%')) { /* special "%{cuz}t" formats */
+            while (*arg) {
+                switch (*arg++) {
+                case 'u':
+                    option |= AP_CTIME_OPTION_USEC;
+                    break;
+                case 'c':
+                    option |= AP_CTIME_OPTION_COMPACT;
+                    break;
+                case 'z':
+                    option |= AP_CTIME_OPTION_GMTOFF;
+                    break;
+                }
+            }
+        }
+        else { /* "%{strftime %-format}t" */
+            apr_size_t len = 0;
+            apr_time_exp_t expt;
+            ap_explode_recent_localtime(&expt, apr_time_now());
+            apr_strftime(buf, &len, buflen, arg, &expt);
+            return (int)len;
+        }
     }
 
     ap_recent_ctime_ex(buf, apr_time_now(), option, &time_len);
@@ -698,7 +724,19 @@ static int log_apr_status(const ap_errorlog_info *info, const char *arg,
         len = apr_snprintf(buf, buflen, "(os 0x%08x)",
                            status - APR_OS_START_SYSERR);
     }
+#if (APU_MAJOR_VERSION == 1 && APU_MINOR_VERSION >= 7)
+    if (status < APR_UTIL_START_STATUS) {
+        apr_strerror(status, buf + len, buflen - len);
+    }
+    else if (status < (APR_UTIL_START_STATUS + APR_UTIL_ERRSPACE_SIZE)) {
+        apu_strerror(status, buf + len, buflen - len);
+    }
+    else {
+        apr_strerror(status, buf + len, buflen - len);
+    }
+#else
     apr_strerror(status, buf + len, buflen - len);
+#endif
     len += strlen(buf + len);
     return len;
 }
@@ -889,7 +927,7 @@ static int do_errorlog_default(const ap_errorlog_info *info, char *buf,
 #if APR_HAS_THREADS
         field_start = len;
         len += cpystrn(buf + len, ":tid ", buflen - len);
-        item_len = log_tid(info, NULL, buf + len, buflen - len);
+        item_len = log_tid(info, DEFAULT_LOG_TID, buf + len, buflen - len);
         if (!item_len)
             len = field_start;
         else
@@ -1080,6 +1118,11 @@ static void log_error_core(const char *file, int line, int module_index,
             errorlog_provider = ap_server_conf->errorlog_provider;
             errorlog_provider_handle = ap_server_conf->errorlog_provider_handle;
         }
+
+        /* Use the main ErrorLogFormat if any */
+        if (ap_server_conf) {
+            sconf = ap_get_core_module_config(ap_server_conf->module_config);
+        }
     }
     else {
         int configured_level = r ? ap_get_request_module_loglevel(r, module_index)        :
@@ -1126,6 +1169,10 @@ static void log_error_core(const char *file, int line, int module_index,
                     add_log_id(c, rmain);
                 }
             }
+        }
+        else if (ap_server_conf) {
+            /* Use the main ErrorLogFormat if any */
+            sconf = ap_get_core_module_config(ap_server_conf->module_config);
         }
     }
 

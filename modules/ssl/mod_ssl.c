@@ -25,8 +25,7 @@
  */
 
 #include "ssl_private.h"
-#include "mod_ssl.h"
-#include "mod_ssl_openssl.h"
+
 #include "util_md5.h"
 #include "util_mutex.h"
 #include "ap_provider.h"
@@ -90,11 +89,9 @@ static const command_rec ssl_config_cmds[] = {
     SSL_CMD_SRV(SessionCache, TAKE1,
                 "SSL Session Cache storage "
                 "('none', 'nonenotnull', 'dbm:/path/to/file')")
-#if defined(HAVE_OPENSSL_ENGINE_H) && defined(HAVE_ENGINE_INIT)
     SSL_CMD_SRV(CryptoDevice, TAKE1,
                 "SSL external Crypto Device usage "
                 "('builtin', '...')")
-#endif
     SSL_CMD_SRV(RandomSeed, TAKE23,
                 "SSL Pseudo Random Number Generator (PRNG) seeding source "
                 "('startup|connect builtin|file:/path|exec:/path [bytes]')")
@@ -169,6 +166,9 @@ static const command_rec ssl_config_cmds[] = {
                 "('[+-][" SSL_PROTOCOLS "] ...' - see manual)")
     SSL_CMD_SRV(HonorCipherOrder, FLAG,
                 "Use the server's cipher ordering preference")
+    SSL_CMD_SRV(ClientHelloVars, FLAG,
+                "Enable SSL ClientHello variable collection "
+                "(`on', `off')")
     SSL_CMD_SRV(Compression, FLAG,
                 "Enable SSL level compression "
                 "(`on', `off')")

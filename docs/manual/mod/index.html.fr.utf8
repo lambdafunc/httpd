@@ -70,7 +70,7 @@ multi-processus multi-thread</dd>
 </dl></div>
 <div class="top"><a href="#page-header"><img alt="top" src="../images/up.gif" /></a></div>
 <div class="section"><h2><a id="other" name="other">Autres Modules</a></h2>
-<p class="letters"><a href="#A">&nbsp;A&nbsp;</a> | <a href="#B">&nbsp;B&nbsp;</a> | <a href="#C">&nbsp;C&nbsp;</a> | <a href="#D">&nbsp;D&nbsp;</a> | <a href="#E">&nbsp;E&nbsp;</a> | <a href="#F">&nbsp;F&nbsp;</a> | <a href="#H">&nbsp;H&nbsp;</a> | <a href="#I">&nbsp;I&nbsp;</a> | <a href="#J">&nbsp;J&nbsp;</a> | <a href="#L">&nbsp;L&nbsp;</a> | <a href="#M">&nbsp;M&nbsp;</a> | <a href="#N">&nbsp;N&nbsp;</a> | <a href="#P">&nbsp;P&nbsp;</a> | <a href="#R">&nbsp;R&nbsp;</a> | <a href="#S">&nbsp;S&nbsp;</a> | <a href="#T">&nbsp;T&nbsp;</a> | <a href="#U">&nbsp;U&nbsp;</a> | <a href="#V">&nbsp;V&nbsp;</a> | <a href="#W">&nbsp;W&nbsp;</a> | <a href="#X">&nbsp;X&nbsp;</a></p>
+<p class="letters"><a href="#A">&nbsp;A&nbsp;</a> | <a href="#B">&nbsp;B&nbsp;</a> | <a href="#C">&nbsp;C&nbsp;</a> | <a href="#D">&nbsp;D&nbsp;</a> | <a href="#E">&nbsp;E&nbsp;</a> | <a href="#F">&nbsp;F&nbsp;</a> | <a href="#H">&nbsp;H&nbsp;</a> | <a href="#I">&nbsp;I&nbsp;</a> | <a href="#J">&nbsp;J&nbsp;</a> | <a href="#L">&nbsp;L&nbsp;</a> | <a href="#M">&nbsp;M&nbsp;</a> | <a href="#N">&nbsp;N&nbsp;</a> | <a href="#P">&nbsp;P&nbsp;</a> | <a href="#R">&nbsp;R&nbsp;</a> | <a href="#S">&nbsp;S&nbsp;</a> | <a href="#U">&nbsp;U&nbsp;</a> | <a href="#V">&nbsp;V&nbsp;</a> | <a href="#W">&nbsp;W&nbsp;</a> | <a href="#X">&nbsp;X&nbsp;</a></p>
 <dl><dt><a href="mod_access_compat.html" id="A" name="A">mod_access_compat</a></dt><dd>Autorisations de groupe à base de nom d'hôte (nom ou
 adresse IP)</dd>
 <dt><a href="mod_actions.html">mod_actions</a></dt><dd>Exécution des scripts CGI en fonction du
@@ -84,6 +84,7 @@ qui peuvent être utilisés pour le serveur</dd>
 <dt><a href="mod_asis.html">mod_asis</a></dt><dd>Envoie des fichiers contenant leurs propres en-têtes
 HTTP</dd>
 <dt><a href="mod_auth_basic.html">mod_auth_basic</a></dt><dd>Authentification HTTP de base</dd>
+<dt><a href="mod_auth_bearer.html">mod_auth_bearer</a></dt><dd>Authentification HTTP du titulaire d'un jeton</dd>
 <dt><a href="mod_auth_digest.html">mod_auth_digest</a></dt><dd>Authentification utilisateur utilisant les condensés
 MD5</dd>
 <dt><a href="mod_auth_form.html">mod_auth_form</a></dt><dd>Authentification à l'aide d'un formulaire</dd>
@@ -102,6 +103,8 @@ la charge des serveurs d'arrière-plan</dd>
 l'authentification et l'autorisation httpd.</dd>
 <dt><a href="mod_authnz_ldap.html">mod_authnz_ldap</a></dt><dd>Permet d'utiliser un annuaire LDAP pour l'authentification
 HTTP de base.</dd>
+<dt><a href="mod_autht_core.html">mod_autht_core</a></dt><dd>Gestion des jetons de base</dd>
+<dt><a href="mod_autht_jwt.html">mod_autht_jwt</a></dt><dd>Authentification à base de jetons utilisant les jetons JWT</dd>
 <dt><a href="mod_authz_core.html">mod_authz_core</a></dt><dd>Socle d'autorisation</dd>
 <dt><a href="mod_authz_dbd.html">mod_authz_dbd</a></dt><dd>Autorisation par groupe ou par identifiant via SQL</dd>
 <dt><a href="mod_authz_dbm.html">mod_authz_dbm</a></dt><dd>Autorisation par groupes sur base de fichiers DBM</dd>
@@ -295,9 +298,6 @@ corps de réponses</dd>
 le groupe spécifiés</dd>
 <dt><a href="mod_syslog.html">mod_syslog</a></dt><dd>Support du fournisseur de journalisation "syslog"</dd>
 <dt><a href="mod_systemd.html">mod_systemd</a></dt><dd>Fournit un support amélioré pour l'intégration de systemd</dd>
-<dt><a href="mod_tls.html" id="T" name="T">mod_tls</a></dt><dd>TLS v1.2 and v1.3 implemented in memory-safe Rust via
-        the rustls library
-    </dd>
 <dt><a href="mod_unique_id.html" id="U" name="U">mod_unique_id</a></dt><dd>Fournit une variable d'environnement contenant un
 identifiant unique pour chaque requête</dd>
 <dt><a href="mod_unixd.html">mod_unixd</a></dt><dd>Sécurité de base (nécessaire) pour les plates-formes de la
@@ -325,7 +325,7 @@ caractères pour les modules de filtrage basés sur libxml2</dd>
 <a href="../tr/mod/" hreflang="tr" rel="alternate" title="Türkçe">&nbsp;tr&nbsp;</a> |
 <a href="../zh-cn/mod/" hreflang="zh-cn" rel="alternate" title="Simplified Chinese">&nbsp;zh-cn&nbsp;</a></p>
 </div><div id="footer">
-<p class="apache">Copyright 2021 The Apache Software Foundation.<br />Autorisé sous <a href="http://www.apache.org/licenses/LICENSE-2.0">Apache License, Version 2.0</a>.</p>
+<p class="apache">Copyright 2025 The Apache Software Foundation.<br />Autorisé sous <a href="http://www.apache.org/licenses/LICENSE-2.0">Apache License, Version 2.0</a>.</p>
 <p class="menu"><a href="../mod/">Modules</a> | <a href="../mod/quickreference.html">Directives</a> | <a href="http://wiki.apache.org/httpd/FAQ">FAQ</a> | <a href="../glossary.html">Glossaire</a> | <a href="../sitemap.html">Plan du site</a></p></div><script type="text/javascript"><!--//--><![CDATA[//><!--
 if (typeof(prettyPrint) !== 'undefined') {
     prettyPrint();

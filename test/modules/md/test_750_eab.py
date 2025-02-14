@@ -18,7 +18,7 @@ class TestEab:
         env.check_acme()
         env.clear_store()
         MDConf(env).install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
 
     @pytest.fixture(autouse=True, scope='function')
     def _method_scope(self, env, request):
@@ -33,10 +33,19 @@ class TestEab:
         conf.add_md(domains)
         conf.add_vhost(domains=domains)
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         md = env.await_error(domain)
         assert md['renewal']['errors'] > 0
         assert md['renewal']['last']['problem'] == 'urn:ietf:params:acme:error:externalAccountRequired'
+        #
+        env.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH10056"   # ACME server policy requires newAccount requests must include a value for the 'externalAccountBinding' field
+            ],
+            matches = [
+                r'.*urn:ietf:params:acme:error:externalAccountRequired.*'
+            ]
+        )
 
     def test_md_750_002(self, env):
         # md with known EAB KID and non base64 hmac key configured
@@ -47,10 +56,19 @@ class TestEab:
         conf.add_md(domains)
         conf.add_vhost(domains=domains)
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         md = env.await_error(domain)
         assert md['renewal']['errors'] > 0
         assert md['renewal']['last']['problem'] == 'apache:eab-hmac-invalid'
+        #
+        env.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH10056"   # external account binding HMAC value is not valid base64
+            ],
+            matches = [
+                r'.*problem\[apache:eab-hmac-invalid\].*'
+            ]
+        )
 
     def test_md_750_003(self, env):
         # md with empty EAB KID configured
@@ -61,10 +79,22 @@ class TestEab:
         conf.add_md(domains)
         conf.add_vhost(domains=domains)
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         md = env.await_error(domain)
         assert md['renewal']['errors'] > 0
-        assert md['renewal']['last']['problem'] == 'urn:ietf:params:acme:error:unauthorized'
+        assert md['renewal']['last']['problem'] in [
+            'urn:ietf:params:acme:error:unauthorized',
+            'urn:ietf:params:acme:error:malformed',
+        ]
+        #
+        env.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH10056"   # the field 'kid' references a key that is not known to the ACME server
+            ],
+            matches = [
+                r'.*urn:ietf:params:acme:error:(unauthorized|malformed).*'
+            ]
+        )
 
     def test_md_750_004(self, env):
         # md with unknown EAB KID configured
@@ -75,10 +105,22 @@ class TestEab:
         conf.add_md(domains)
         conf.add_vhost(domains=domains)
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         md = env.await_error(domain)
         assert md['renewal']['errors'] > 0
-        assert md['renewal']['last']['problem'] == 'urn:ietf:params:acme:error:unauthorized'
+        assert md['renewal']['last']['problem'] in [
+            'urn:ietf:params:acme:error:unauthorized',
+            'urn:ietf:params:acme:error:malformed',
+        ]
+        #
+        env.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH10056"   # the field 'kid' references a key that is not known to the ACME server
+            ],
+            matches = [
+                r'.*urn:ietf:params:acme:error:(unauthorized|malformed).*'
+            ]
+        )
 
     def test_md_750_005(self, env):
         # md with known EAB KID but wrong HMAC configured
@@ -89,10 +131,22 @@ class TestEab:
         conf.add_md(domains)
         conf.add_vhost(domains=domains)
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         md = env.await_error(domain)
         assert md['renewal']['errors'] > 0
-        assert md['renewal']['last']['problem'] == 'urn:ietf:params:acme:error:unauthorized'
+        assert md['renewal']['last']['problem'] in [
+            'urn:ietf:params:acme:error:unauthorized',
+            'urn:ietf:params:acme:error:malformed',
+        ]
+        #
+        env.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH10056"   # external account binding JWS verification error: square/go-jose: error in cryptographic primitive
+            ],
+            matches = [
+                r'.*urn:ietf:params:acme:error:(unauthorized|malformed).*'
+            ]
+        )
 
     def test_md_750_010(self, env):
         # md with correct EAB configured
@@ -104,7 +158,7 @@ class TestEab:
         conf.add_md(domains)
         conf.add_vhost(domains=domains)
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         assert env.await_completion(domains)
 
     def test_md_750_011(self, env):
@@ -120,11 +174,20 @@ class TestEab:
         conf.add_md([domain_b])
         conf.add_vhost(domains=[domain_b])
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         assert env.await_completion([domain_a], restart=False)
         md = env.await_error(domain_b)
         assert md['renewal']['errors'] > 0
         assert md['renewal']['last']['problem'] == 'urn:ietf:params:acme:error:externalAccountRequired'
+        #
+        env.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH10056"   # ACME server policy requires newAccount requests must include a value for the 'externalAccountBinding' field
+            ],
+            matches = [
+                r'.*urn:ietf:params:acme:error:externalAccountRequired.*'
+            ]
+        )
 
     def test_md_750_012(self, env):
         # first one md without EAB, then one with
@@ -139,11 +202,20 @@ class TestEab:
         conf.end_md()
         conf.add_vhost(domains=[domain_b])
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         assert env.await_completion([domain_b], restart=False)
         md = env.await_error(domain_a)
         assert md['renewal']['errors'] > 0
         assert md['renewal']['last']['problem'] == 'urn:ietf:params:acme:error:externalAccountRequired'
+        #
+        env.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH10056"   # ACME server policy requires newAccount requests must include a value for the 'externalAccountBinding' field
+            ],
+            matches = [
+                r'.*urn:ietf:params:acme:error:externalAccountRequired.*'
+            ]
+        )
 
     def test_md_750_013(self, env):
         # 2 mds with the same EAB, should one create a single account
@@ -159,7 +231,7 @@ class TestEab:
         conf.end_md()
         conf.add_vhost(domains=[domain_b])
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         assert env.await_completion([domain_a, domain_b])
         md_a = env.get_md_status(domain_a)
         md_b = env.get_md_status(domain_b)
@@ -175,7 +247,7 @@ class TestEab:
         conf.add_md(domains)
         conf.add_vhost(domains=domains)
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         assert env.await_completion(domains)
         md_1 = env.get_md_status(domain)
         conf = MDConf(env)
@@ -186,7 +258,7 @@ class TestEab:
         conf.add_md(domains)
         conf.add_vhost(domains=domains)
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         assert env.await_completion(domains)
         md_2 = env.get_md_status(domain)
         assert md_1['ca'] != md_2['ca']
@@ -201,7 +273,7 @@ class TestEab:
         conf.add_md(domains)
         conf.add_vhost(domains=domains)
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         assert env.await_completion(domains)
         conf = MDConf(env)
         # this is another one of the values in conf/pebble-eab.json
@@ -210,11 +282,20 @@ class TestEab:
         conf.add_md(domains)
         conf.add_vhost(domains=domains)
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         assert env.await_error(domain)
         md = env.await_error(domain)
         assert md['renewal']['errors'] > 0
         assert md['renewal']['last']['problem'] == 'urn:ietf:params:acme:error:externalAccountRequired'
+        #
+        env.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH10056"   # ACME server policy requires newAccount requests must include a value for the 'externalAccountBinding' field
+            ],
+            matches = [
+                r'.*urn:ietf:params:acme:error:externalAccountRequired.*'
+            ]
+        )
 
     def test_md_750_016(self, env):
         # md with correct EAB, get cert, change to invalid EAB
@@ -226,7 +307,7 @@ class TestEab:
         conf.add_md(domains)
         conf.add_vhost(domains=domains)
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         assert env.await_completion(domains)
         conf = MDConf(env)
         # this is another one of the values in conf/pebble-eab.json
@@ -236,11 +317,20 @@ class TestEab:
         conf.add_md(domains)
         conf.add_vhost(domains=domains)
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         assert env.await_error(domain)
         md = env.await_error(domain)
         assert md['renewal']['errors'] > 0
         assert md['renewal']['last']['problem'] == 'urn:ietf:params:acme:error:unauthorized'
+        #
+        env.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH10056"   # the field 'kid' references a key that is not known to the ACME server
+            ],
+            matches = [
+                r'.*urn:ietf:params:acme:error:unauthorized.*'
+            ]
+        )
 
     def test_md_750_017(self, env):
         # md without EAB explicitly set to none
@@ -253,10 +343,19 @@ class TestEab:
         conf.end_md()
         conf.add_vhost(domains=domains)
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         md = env.await_error(domain)
         assert md['renewal']['errors'] > 0
         assert md['renewal']['last']['problem'] == 'urn:ietf:params:acme:error:externalAccountRequired'
+        #
+        env.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH10056"   # ACME server policy requires newAccount requests must include a value for the 'externalAccountBinding' field
+            ],
+            matches = [
+                r'.*urn:ietf:params:acme:error:externalAccountRequired.*'
+            ]
+        )
 
     def test_md_750_018(self, env):
         # md with EAB file that does not exist
@@ -333,5 +432,5 @@ class TestEab:
         conf.add_md(domains)
         conf.add_vhost(domains=domains)
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         assert env.await_completion(domains)

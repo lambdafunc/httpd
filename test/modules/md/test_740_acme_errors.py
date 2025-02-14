@@ -16,7 +16,7 @@ class TestAcmeErrors:
         env.check_acme()
         env.clear_store()
         MDConf(env).install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
 
     @pytest.fixture(autouse=True, scope='function')
     def _method_scope(self, env, request):
@@ -33,7 +33,7 @@ class TestAcmeErrors:
         conf.add_md(domains)
         conf.add_vhost(domains)
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         md = env.await_error(domain)
         assert md
         assert md['renewal']['errors'] > 0
@@ -46,6 +46,15 @@ class TestAcmeErrors:
             assert md['renewal']['last']['detail'] == (
                     "Error creating new order :: Cannot issue for "
                     "\"%s\": Domain name contains an invalid character" % domains[1])
+        #
+        env.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH10056"   # Order included DNS identifier with a value containing an illegal character
+            ],
+            matches = [
+                r'.*urn:ietf:params:acme:error:malformed.*'
+            ]
+        )
 
     # test case: MD with 3 names, 2 invalid
     #
@@ -56,7 +65,7 @@ class TestAcmeErrors:
         conf.add_md(domains)
         conf.add_vhost(domains)
         conf.install()
-        assert env.apache_restart() == 0
+        assert env.apache_restart() == 0, f'{env.apachectl_stderr}'
         md = env.await_error(domain)
         assert md
         assert md['renewal']['errors'] > 0
@@ -70,3 +79,12 @@ class TestAcmeErrors:
                 "Error creating new order :: Cannot issue for")
             assert md['renewal']['last']['subproblems']
             assert len(md['renewal']['last']['subproblems']) == 2
+        #
+        env.httpd_error_log.ignore_recent(
+            lognos = [
+                "AH10056"   # Order included DNS identifier with a value containing an illegal character
+            ],
+            matches = [
+                r'.*urn:ietf:params:acme:error:malformed.*'
+            ]
+        )

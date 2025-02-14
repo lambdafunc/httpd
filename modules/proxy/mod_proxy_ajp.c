@@ -65,13 +65,37 @@ static int proxy_ajp_canon(request_rec *r, char *url)
     if (apr_table_get(r->notes, "proxy-nocanon")) {
         path = url;   /* this is the raw path */
     }
-    else {
-        path = ap_proxy_canonenc(r->pool, url, strlen(url), enc_path, 0,
-                                 r->proxyreq);
+    else if (apr_table_get(r->notes, "proxy-noencode")) {
+        path = url;   /* this is the encoded path already */
         search = r->args;
     }
-    if (path == NULL)
-        return HTTP_BAD_REQUEST;
+    else {
+        core_dir_config *d = ap_get_core_module_config(r->per_dir_config);
+        int flags = d->allow_encoded_slashes && !d->decode_encoded_slashes ? PROXY_CANONENC_NOENCODEDSLASHENCODING : 0;
+
+        path = ap_proxy_canonenc_ex(r->pool, url, strlen(url), enc_path, flags,
+                                    r->proxyreq);
+        if (!path) {
+            return HTTP_BAD_REQUEST;
+        }
+        search = r->args;
+    }
+    /*
+     * If we have a raw control character or a ' ' in nocanon path or
+     * r->args, correct encoding was missed.
+     */
+    if (path == url && *ap_scan_vchar_obstext(path)) {
+        ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, APLOGNO(10418)
+                      "To be forwarded path contains control "
+                      "characters or spaces");
+        return HTTP_FORBIDDEN;
+    }
+    if (search && *ap_scan_vchar_obstext(search)) {
+         ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, APLOGNO(10406)
+                       "To be forwarded query string contains control "
+                       "characters or spaces");
+         return HTTP_FORBIDDEN;
+    }
 
     if (port != def_port)
          apr_snprintf(sport, sizeof(sport), ":%d", port);
@@ -194,6 +218,9 @@ static int ap_proxy_ajp_request(apr_pool_t *p, request_rec *r,
 
     if (psf->io_buffer_size_set)
        maxsize = psf->io_buffer_size;
+    /* Override with worker setting if present */
+    if (conn->worker->s->io_buffer_size_set)
+       maxsize = conn->worker->s->io_buffer_size;
     if (maxsize > AJP_MAX_BUFFER_SZ)
        maxsize = AJP_MAX_BUFFER_SZ;
     else if (maxsize < AJP_MSG_BUFFER_SZ)
@@ -212,10 +239,8 @@ static int ap_proxy_ajp_request(apr_pool_t *p, request_rec *r,
     if (status != APR_SUCCESS) {
         conn->close = 1;
         ap_log_rerror(APLOG_MARK, APLOG_ERR, status, r, APLOGNO(00868)
-                      "request failed to %pI (%s:%d)",
-                      conn->worker->cp->addr,
-                      conn->worker->s->hostname_ex,
-                      (int)conn->worker->s->port);
+                      "request failed to %pI (%s:%hu)",
+                      conn->addr, conn->hostname, conn->port);
         if (status == AJP_EOVERFLOW)
             return HTTP_BAD_REQUEST;
         else {
@@ -255,6 +280,8 @@ static int ap_proxy_ajp_request(apr_pool_t *p, request_rec *r,
             ap_log_rerror(APLOG_MARK, APLOG_ERR, 0, r, APLOGNO(10396)
                           "%s Transfer-Encoding is not supported",
                           tenc);
+            /* We had a failure: Close connection to backend */
+            conn->close = 1;
             return HTTP_INTERNAL_SERVER_ERROR;
         }
     } else {
@@ -308,10 +335,8 @@ static int ap_proxy_ajp_request(apr_pool_t *p, request_rec *r,
                 conn->close = 1;
                 apr_brigade_destroy(input_brigade);
                 ap_log_rerror(APLOG_MARK, APLOG_ERR, status, r, APLOGNO(00876)
-                              "send failed to %pI (%s:%d)",
-                              conn->worker->cp->addr,
-                              conn->worker->s->hostname_ex,
-                              (int)conn->worker->s->port);
+                              "send failed to %pI (%s:%hu)",
+                              conn->addr, conn->hostname, conn->port);
                 /*
                  * It is fatal when we failed to send a (part) of the request
                  * body.
@@ -350,10 +375,8 @@ static int ap_proxy_ajp_request(apr_pool_t *p, request_rec *r,
         conn->close = 1;
         apr_brigade_destroy(input_brigade);
         ap_log_rerror(APLOG_MARK, APLOG_ERR, status, r, APLOGNO(00878)
-                      "read response failed from %pI (%s:%d)",
-                      conn->worker->cp->addr,
-                      conn->worker->s->hostname_ex,
-                      (int)conn->worker->s->port);
+                      "read response failed from %pI (%s:%hu)",
+                      conn->addr, conn->hostname, conn->port);
 
         /* If we had a successful cping/cpong and then a timeout
          * we assume it is a request that cause a back-end timeout,
@@ -650,10 +673,8 @@ static int ap_proxy_ajp_request(apr_pool_t *p, request_rec *r,
     }
     else {
         ap_log_rerror(APLOG_MARK, APLOG_DEBUG, 0, r, APLOGNO(00892)
-                      "got response from %pI (%s:%d)",
-                      conn->worker->cp->addr,
-                      conn->worker->s->hostname_ex,
-                      (int)conn->worker->s->port);
+                      "got response from %pI (%s:%hu)",
+                      conn->addr, conn->hostname, conn->port);
 
         if (ap_proxy_should_override(conf, r->status)) {
             /* clear r->status for override error, otherwise ErrorDocument
@@ -675,10 +696,8 @@ static int ap_proxy_ajp_request(apr_pool_t *p, request_rec *r,
 
     if (backend_failed) {
         ap_log_rerror(APLOG_MARK, APLOG_ERR, status, r, APLOGNO(00893)
-                      "dialog to %pI (%s:%d) failed",
-                      conn->worker->cp->addr,
-                      conn->worker->s->hostname_ex,
-                      (int)conn->worker->s->port);
+                      "dialog to %pI (%s:%hu) failed",
+                      conn->addr, conn->hostname, conn->port);
         /*
          * If we already send data, signal a broken backend connection
          * upwards in the chain.
@@ -820,9 +839,8 @@ static int proxy_ajp_handler(request_rec *r, proxy_worker *worker,
             if (status != APR_SUCCESS) {
                 backend->close = 1;
                 ap_log_rerror(APLOG_MARK, APLOG_ERR, status, r, APLOGNO(00897)
-                              "cping/cpong failed to %pI (%s:%d)",
-                              worker->cp->addr, worker->s->hostname_ex,
-                              (int)worker->s->port);
+                              "cping/cpong failed to %pI (%s:%hu)",
+                              backend->addr, backend->hostname, backend->port);
                 status = HTTP_SERVICE_UNAVAILABLE;
                 retry++;
                 continue;

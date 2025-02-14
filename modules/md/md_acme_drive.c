@@ -305,11 +305,11 @@ static apr_status_t csr_req(md_acme_t *acme, const md_http_response_t *res, void
     
     (void)acme;
     location = apr_table_get(res->headers, "location");
-    if (!location) {
-        md_log_perror(MD_LOG_MARK, MD_LOG_ERR, APR_EINVAL, d->p, 
-                      "cert created without giving its location header");
-        return APR_EINVAL;
-    }
+    if (!location)
+      return rv;
+
+    md_log_perror(MD_LOG_MARK, MD_LOG_DEBUG, 0, d->p,
+                  "cert created with location header (old ACMEv1 style)");
     ad->order->certificate = apr_pstrdup(d->p, location);
     if (APR_SUCCESS != (rv = md_acme_order_save(d->store, d->p, MD_SG_STAGING, 
                                                 d->md->name, ad->order, 0))) { 
@@ -515,8 +515,8 @@ static apr_status_t acme_driver_preload_init(md_proto_driver_t *d, md_result_t *
     d->baton = ad;
     
     ad->driver = d;
-    ad->authz_monitor_timeout = apr_time_from_sec(30);
-    ad->cert_poll_timeout = apr_time_from_sec(30);
+    ad->authz_monitor_timeout = apr_time_from_sec(300);
+    ad->cert_poll_timeout = apr_time_from_sec(300);
     ad->ca_challenges = apr_array_make(d->p, 3, sizeof(const char*));
     
     /* We want to obtain credentials (key+certificate) for every key spec in this MD */
@@ -587,7 +587,9 @@ static apr_status_t acme_driver_init(md_proto_driver_t *d, md_result_t *result)
             ad->ca_challenges = md_array_str_remove(d->p, ad->ca_challenges, MD_AUTHZ_TYPE_TLSALPN01, 0);
             dis_alpn_acme = 1;
         }
-        if (!apr_table_get(d->env, MD_KEY_CMD_DNS01) && md_array_str_index(ad->ca_challenges, MD_AUTHZ_TYPE_DNS01, 0, 1) >= 0) {
+        if (!apr_table_get(d->env, MD_KEY_CMD_DNS01)
+            && NULL == d->md->dns01_cmd
+            && md_array_str_index(ad->ca_challenges, MD_AUTHZ_TYPE_DNS01, 0, 1) >= 0) {
             ad->ca_challenges = md_array_str_remove(d->p, ad->ca_challenges, MD_AUTHZ_TYPE_DNS01, 0);
             dis_dns = 1;
         }
@@ -763,7 +765,9 @@ static apr_status_t acme_renew(md_proto_driver_t *d, md_result_t *result)
     if (!ad->domains) {
         ad->domains = md_dns_make_minimal(d->p, ad->md->domains);
     }
-    
+    ad->profile = ad->md->profile;
+    ad->profile_mandatory = ad->md->profile_mandatory;
+
     md_result_activity_printf(result, "Contacting ACME server for %s at %s",
                               d->md->name, ca_effective);
     if (APR_SUCCESS != (rv = md_acme_create(&ad->acme, d->p, ca_effective,
@@ -832,7 +836,7 @@ static apr_status_t acme_renew(md_proto_driver_t *d, md_result_t *result)
                                 md_result_printf(result, rv, "Certificate and private key do not match.");
 
                                 /* Delete the order */
-                                md_acme_order_purge(d->store, d->p, MD_SG_STAGING, d->md->name, d->env);
+                                md_acme_order_purge(d->store, d->p, MD_SG_STAGING, d->md, d->env);
 
                                 goto out;
                             }
@@ -849,7 +853,7 @@ static apr_status_t acme_renew(md_proto_driver_t *d, md_result_t *result)
                 }
                 
                 /* Clean up the order, so the next pkey spec sets up a new one */
-                md_acme_order_purge(d->store, d->p, MD_SG_STAGING, d->md->name, d->env);
+                md_acme_order_purge(d->store, d->p, MD_SG_STAGING, d->md, d->env);
             }
         }
     }
@@ -857,7 +861,7 @@ static apr_status_t acme_renew(md_proto_driver_t *d, md_result_t *result)
     
     /* As last step, cleanup any order we created so that challenge data
      * may be removed asap. */
-    md_acme_order_purge(d->store, d->p, MD_SG_STAGING, d->md->name, d->env);
+    md_acme_order_purge(d->store, d->p, MD_SG_STAGING, d->md, d->env);
     
     /* first time this job ran through */
     first = 1;    
@@ -998,7 +1002,7 @@ static apr_status_t acme_preload(md_proto_driver_t *d, md_store_group_t load_gro
     }
 
     md_result_activity_setn(result, "purging order information");
-    md_acme_order_purge(d->store, d->p, MD_SG_STAGING, name, d->env);
+    md_acme_order_purge(d->store, d->p, MD_SG_STAGING, md, d->env);
 
     md_result_activity_setn(result, "purging store tmp space");
     rv = md_store_purge(d->store, d->p, load_group, name);
